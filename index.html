@@ -3,290 +3,213 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Bubble Defense - Canvas Game</title>
+  <title>Resident Slug - Survival Horror (Canvas)</title>
 
   <!-- Bootstrap 5 -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
 
   <style>
-    body { background:#0b1220; }
-    .game-card{
-      border:0;
-      border-radius: 16px;
-      overflow:hidden;
-      box-shadow: 0 12px 40px rgba(0,0,0,.35);
-      background: rgba(255,255,255,.04);
+    body{ background:#070b14; color:#e5e7eb; }
+    .shell{
+      max-width: 1200px;
+      margin: 18px auto;
+      padding: 0 12px;
     }
-    .game-header{
-      background: linear-gradient(135deg, rgba(56,189,248,.18), rgba(99,102,241,.10));
+    .cardx{
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 18px;
+      overflow: hidden;
+      background: rgba(255,255,255,.03);
+      box-shadow: 0 18px 60px rgba(0,0,0,.55);
+    }
+    .topbar{
+      background: linear-gradient(135deg, rgba(220,38,38,.20), rgba(59,130,246,.12));
       border-bottom: 1px solid rgba(255,255,255,.08);
+      padding: 14px 16px;
     }
     .badge-soft{
-      background: rgba(255,255,255,.08);
+      background: rgba(0,0,0,.35);
       border: 1px solid rgba(255,255,255,.10);
-      color: rgba(255,255,255,.9);
+      color: rgba(255,255,255,.90);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-weight: 600;
+      font-size: .92rem;
+      backdrop-filter: blur(8px);
     }
+
     .canvas-wrap{
       position: relative;
-      border-radius: 14px;
-      overflow:hidden;
-      border: 1px solid rgba(255,255,255,.10);
       background: #0a1020;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.10);
     }
+
     canvas{
       width: 100%;
-      height: 560px;
-      display:block;
-      /* Oculta el cursor real para usar puntero personalizado */
-      cursor: none;
+      height: 720px;
+      display: block;
+      cursor: none; /* cursor personalizado */
       background: #0a1020;
     }
-    .hud{
-      position:absolute;
-      top: 12px;
-      left: 12px;
-      display:flex;
-      gap:10px;
-      flex-wrap: wrap;
-      z-index: 5;
-      pointer-events:none;
+    @media (max-width: 992px){
+      canvas{ height: 520px; }
     }
-    .hud .pill{
-      padding:8px 10px;
-      border-radius:999px;
-      background: rgba(0,0,0,.35);
-      border:1px solid rgba(255,255,255,.12);
-      color: rgba(255,255,255,.92);
-      font-size: .92rem;
-      backdrop-filter: blur(6px);
+
+    .bottom{
+      border-top: 1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.02);
+      padding: 12px 14px;
     }
-    .help{
-      position:absolute;
-      bottom: 12px;
-      left: 12px;
-      right: 12px;
-      z-index: 5;
+
+    .hint{
       background: rgba(0,0,0,.35);
-      border:1px solid rgba(255,255,255,.12);
+      border: 1px solid rgba(255,255,255,.10);
       border-radius: 14px;
       padding: 10px 12px;
-      color: rgba(255,255,255,.9);
-      backdrop-filter: blur(6px);
+      color: rgba(255,255,255,.85);
     }
-    .help b { color: #e2e8f0; }
-    .overlay{
-      position:absolute;
-      inset:0;
-      z-index: 10;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      background: rgba(0,0,0,.70);
-      padding: 18px;
-    }
-    .overlay.hidden{ display:none; }
-    .panel{
-      width:min(920px, 96vw);
-      border-radius: 18px;
-      border:1px solid rgba(255,255,255,.14);
-      background: linear-gradient(135deg, rgba(15,23,42,.95), rgba(2,6,23,.95));
-      box-shadow: 0 18px 60px rgba(0,0,0,.5);
-      padding: 18px;
-      color: rgba(255,255,255,.92);
-    }
-    .panel h2{ margin:0 0 6px 0; font-size: 1.4rem; }
-    .panel p{ margin:0; color: rgba(255,255,255,.75); }
     .kbd{
-      display:inline-block;
-      padding: 2px 8px;
+      display:inline-block; padding:2px 8px;
       border-radius: 8px;
       border: 1px solid rgba(255,255,255,.18);
       background: rgba(255,255,255,.06);
       font-size: .9rem;
+      margin: 0 3px;
     }
-    footer{
-      border-top: 1px solid rgba(255,255,255,.08);
-      color: rgba(255,255,255,.75);
+
+    /* overlay inicio */
+    .overlay{
+      position:absolute; inset:0;
+      display:flex; align-items:center; justify-content:center;
+      background: rgba(0,0,0,.72);
+      z-index: 20;
+      padding: 16px;
     }
-    .mini-img{
-      width: 42px; height: 42px;
-      border-radius: 12px;
-      background: rgba(255,255,255,.08);
+    .overlay.hidden{ display:none; }
+    .panel{
+      width: min(920px, 96vw);
+      background: linear-gradient(135deg, rgba(15,23,42,.96), rgba(2,6,23,.96));
       border: 1px solid rgba(255,255,255,.12);
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      overflow:hidden;
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow: 0 18px 60px rgba(0,0,0,.55);
     }
-    .mini-img img{ width:100%; height:100%; object-fit: cover; }
+    .panel p{ color: rgba(255,255,255,.75); }
+
+    footer{
+      color: rgba(255,255,255,.70);
+      font-size: .9rem;
+      padding: 10px 2px 0;
+    }
   </style>
 </head>
 
 <body>
-
-  <!-- HEADER -->
-  <header class="py-3">
-    <div class="container">
-      <div class="game-card">
-        <div class="game-header p-3 p-md-4">
-          <div class="d-flex gap-3 align-items-center justify-content-between flex-wrap">
-            <div class="d-flex gap-3 align-items-center">
-              <div class="mini-img">
-                <!-- imagen representativa del juego (svg embebido) -->
-                <img id="gameIcon" alt="Game Icon">
-              </div>
-              <div>
-                <h1 class="h4 mb-1 text-white">Bubble Defense (Interactividad 2D)</h1>
-                <div class="text-white-50 small">
-                  Elimina objetivos con el mouse • Sube niveles • Rompe tu High Score
-                </div>
-              </div>
-            </div>
-
-            <div class="d-flex gap-2 align-items-center">
-              <span class="badge badge-soft rounded-pill px-3 py-2">Nivel: <b id="lvl">1</b>/10</span>
-              <span class="badge badge-soft rounded-pill px-3 py-2">Score: <b id="score">0</b></span>
-              <span class="badge badge-soft rounded-pill px-3 py-2">High: <b id="high">0</b></span>
-            </div>
-          </div>
+  <div class="shell">
+    <div class="cardx">
+      <!-- HEADER -->
+      <div class="topbar d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+          <div class="h5 mb-0 fw-bold">🧟 Resident Slug - Survival Horror</div>
+          <div class="small text-white-50">10 niveles • zombies con ataques distintos • jefe final • high score</div>
         </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <div class="badge-soft">Nivel: <span id="uiLvl">1</span>/10</div>
+          <div class="badge-soft">Score: <span id="uiScore">0</span></div>
+          <div class="badge-soft">High: <span id="uiHigh">0</span></div>
+        </div>
+      </div>
 
-        <!-- MAIN -->
-        <main class="p-3 p-md-4">
-          <div class="row g-3">
-            <div class="col-12 col-lg-8">
-              <div class="canvas-wrap">
-                <div class="hud">
-                  <div class="pill">Modo: <b id="modeLabel">Cazar</b></div>
-                  <div class="pill">Objetos: <b id="alive">0</b></div>
-                  <div class="pill">Eliminados: <b id="killed">0</b> (<b id="killedPct">0</b>%)</div>
-                  <div class="pill">Tiempo: <b id="time">0.0</b>s</div>
-                </div>
+      <!-- MAIN -->
+      <div class="p-3">
+        <div class="canvas-wrap">
+          <canvas id="canvas" tabindex="0"></canvas>
 
-                <canvas id="canvas"></canvas>
-
-                <div class="help">
-                  <b>Instrucciones rápidas:</b>
-                  <span class="ms-1">Click izquierdo para eliminar objetivos.</span>
-                  <span class="ms-2">Presiona <span class="kbd">TAB</span> para cambiar a modo <b>Esquivar</b>.</span>
-                  <span class="ms-2">Presiona <span class="kbd">P</span> para pausar.</span>
-                  <span class="ms-2">Presiona <span class="kbd">R</span> para reiniciar.</span>
-                </div>
-
-                <!-- OVERLAY -->
-                <div id="overlay" class="overlay">
-                  <div class="panel">
-                    <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap">
-                      <div>
-                        <h2>🎮 Bubble Defense</h2>
-                        <p class="mb-3">
-                          <b>Modo Cazar:</b> elimina burbujas con el mouse para subir tu score.<br>
-                          <b>Modo Esquivar (invertido):</b> mueve el mouse para evitar obstáculos. Si te tocan, pierdes.
-                        </p>
-                      </div>
-                      <div class="d-flex gap-2">
-                        <button id="btnStart" class="btn btn-info fw-semibold">Iniciar</button>
-                        <button id="btnHow" class="btn btn-outline-light">Ayuda</button>
-                      </div>
-                    </div>
-
-                    <div class="row g-3 mt-1">
-                      <div class="col-12 col-md-7">
-                        <div class="p-3 rounded-3" style="background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.10)">
-                          <div class="fw-semibold mb-1">Controles</div>
-                          <div class="small text-white-50">
-                            • Click: eliminar objetivos (solo en modo Cazar)<br>
-                            • <span class="kbd">TAB</span>: cambiar modo (Cazar / Esquivar)<br>
-                            • <span class="kbd">P</span>: Pausar/Reanudar<br>
-                            • <span class="kbd">R</span>: Reiniciar juego<br>
-                          </div>
-                        </div>
-                      </div>
-                      <div class="col-12 col-md-5">
-                        <div class="p-3 rounded-3" style="background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.10)">
-                          <div class="fw-semibold mb-1">Dificultad</div>
-                          <div class="small text-white-50">
-                            • 10 niveles<br>
-                            • Aumenta velocidad y spawns<br>
-                            • Guarda High Score automáticamente<br>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div id="howBox" class="mt-3 d-none">
-                      <div class="alert alert-light mb-0">
-                        <b>Tip:</b> en niveles altos, prioriza los objetivos grandes (dan más puntos) y evita los “obstáculos”.
-                      </div>
-                    </div>
-
+          <!-- OVERLAY INICIO -->
+          <div id="overlay" class="overlay">
+            <div class="panel">
+              <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+                <div>
+                  <div class="h4 mb-1">🎮 Instrucciones rápidas</div>
+                  <p class="mb-2">
+                    Juego 2D estilo “Metal/Resident”: muévete, apunta con el mouse, dispara y sobrevive.
+                    La puerta se abre cuando cumples la meta de kills del nivel.
+                  </p>
+                  <div class="small">
+                    <span class="kbd">W A S D</span> mover •
+                    <span class="kbd">Mouse</span> apuntar •
+                    <span class="kbd">Click / Space</span> disparar •
+                    <span class="kbd">R</span> recargar •
+                    <span class="kbd">H</span> curar •
+                    <span class="kbd">E</span> interactuar (puerta) •
+                    <span class="kbd">P</span> pausa •
+                    <span class="kbd">M</span> mute
                   </div>
                 </div>
-
-              </div>
-            </div>
-
-            <!-- Panel lateral -->
-            <div class="col-12 col-lg-4">
-              <div class="game-card p-3">
-                <div class="d-flex justify-content-between align-items-center">
-                  <div class="text-white fw-semibold">Panel</div>
-                  <span class="text-white-50 small">Bootstrap UI</span>
-                </div>
-
-                <hr class="border border-white border-opacity-10 my-3"/>
-
-                <div class="mb-3">
-                  <label class="form-label text-white-50">Volumen SFX</label>
-                  <input id="vol" type="range" class="form-range" min="0" max="1" step="0.01" value="0.85">
-                </div>
-
-                <div class="mb-3">
-                  <label class="form-label text-white-50">Dificultad base</label>
-                  <select id="difficulty" class="form-select">
-                    <option value="1">Normal</option>
-                    <option value="1.25">Difícil</option>
-                    <option value="1.5">Hardcore</option>
-                  </select>
-                </div>
-
                 <div class="d-flex gap-2">
-                  <button id="btnPause" class="btn btn-outline-light w-50">Pausar</button>
-                  <button id="btnRestart" class="btn btn-outline-info w-50">Reiniciar</button>
-                </div>
-
-                <div class="mt-3 small text-white-50">
-                  <b>Reglas:</b> en Cazar, click elimina objetivos. En Esquivar, solo mueve el mouse.
+                  <button id="btnStart" class="btn btn-danger fw-semibold">Iniciar</button>
+                  <button id="btnReset" class="btn btn-outline-light">Reiniciar</button>
                 </div>
               </div>
 
-              <div class="game-card p-3 mt-3">
-                <div class="text-white fw-semibold mb-1">Logros del nivel</div>
-                <div class="small text-white-50">
-                  Meta: eliminar <b id="goalN">10</b> objetivos por nivel.<br>
-                  Progreso: <b id="progN">0</b>/<b id="goalN2">10</b>
+              <hr class="border border-white border-opacity-10 my-3" />
+
+              <div class="row g-3">
+                <div class="col-12 col-lg-6">
+                  <div class="hint">
+                    <b>Objetivo:</b> elimina zombies para desbloquear la <b>PUERTA</b> y pasar al siguiente nivel.
+                    En el nivel 10 aparece el <b>JEFE FINAL</b>.
+                  </div>
+                </div>
+                <div class="col-12 col-lg-6">
+                  <div class="hint">
+                    <b>Tip:</b> algunos enemigos disparan (spitter), otros cargan (perro),
+                    otros tiran “lengua” (blanco/araña). ¡Aprende sus patrones!
+                  </div>
                 </div>
               </div>
+
             </div>
           </div>
-        </main>
 
-        <!-- FOOTER -->
-        <footer class="p-3 p-md-4">
-          <div class="container-fluid px-0">
-            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-              <div class="small">
-                Créditos: <b class="text-white">RODRIGO AXEL NOEGGERATH MEDINA</b> · Ingeniería en TICS ·
-                <span class="text-white-50">sonrodrigo.15@gmail.com</span>
+        </div>
+
+        <!-- CONTROLES ABAJO (ya no estorban) -->
+        <div class="bottom mt-3">
+          <div class="row g-2 align-items-center">
+            <div class="col-12 col-lg-7">
+              <div class="hint">
+                <b>Controles:</b>
+                <span class="kbd">W A S D</span> mover
+                <span class="kbd">Mouse</span> apuntar
+                <span class="kbd">Click/Space</span> disparar
+                <span class="kbd">R</span> recargar
+                <span class="kbd">H</span> curar
+                <span class="kbd">E</span> puerta
+                <span class="kbd">P</span> pausa
+                <span class="kbd">M</span> mute
               </div>
-              <div class="small text-white-50">© <span id="year"></span> - Canvas Game</div>
+            </div>
+            <div class="col-12 col-lg-5 d-flex gap-2 justify-content-lg-end flex-wrap">
+              <button id="btnPause" class="btn btn-outline-light">Pausa</button>
+              <button id="btnMute" class="btn btn-outline-warning">Sonido</button>
+              <label class="d-flex align-items-center gap-2 small text-white-50">
+                Volumen
+                <input id="vol" type="range" class="form-range" min="0" max="1" step="0.01" value="0.85" style="width:170px">
+              </label>
             </div>
           </div>
-        </footer>
 
+          <footer class="d-flex justify-content-between flex-wrap gap-2 mt-2">
+            <div>Créditos: <b class="text-white">RODRIGO AXEL NOEGGERATH MEDINA</b> · Ingeniería en TICS · <span class="text-white-50">sonrodrigo.15@gmail.com</span></div>
+            <div class="text-white-50">© <span id="year"></span> Canvas 2D</div>
+          </footer>
+        </div>
       </div>
     </div>
-  </header>
+  </div>
 
   <script>
     document.getElementById("year").textContent = new Date().getFullYear();
@@ -295,4 +218,3 @@
   <script src="js/main.js"></script>
 </body>
 </html>
-
