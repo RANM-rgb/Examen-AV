@@ -79,7 +79,7 @@ const ASSETS = {
   // player
   idle:     { src:"img/player.png" },
   runR:     { src:"img/run1.png" },
-  runL:     { src:"img/runl_left.png" },
+  runL:     { src:"img/run_left.png" },
   crouch:   { src:"img/agachada.png" },
   jump:     { src:"img/jumping.png" },
   hurt:     { src:"img/damage.png" },
@@ -100,7 +100,7 @@ const ASSETS = {
   // boss anims
   boss_idle:   { src:"img/jefe_final.png" },
   boss_attack: { src:"img/heavy_attack.png" },
-  boss_hurt:   { src:"img/boss_hurt.png" },
+  boss_hurt:   { src:"img/critical_damage.png" },
 };
 
 const GFX = {};
