@@ -48,4 +48,8 @@ Desarrollado íntegramente en **JavaScript puro (Vanilla JS)** utilizando la API
 ## 🚀 Instalación y Uso
 
 1. Clona este repositorio:
+<<<<<<< HEAD
    https://github.com/RANM-rgb/Examen-AV.git
+=======
+ https://github.com/RANM-rgb/Examen-AV.git
+>>>>>>> 011abde (Favicon)
