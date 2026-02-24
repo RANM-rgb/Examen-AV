@@ -1,15 +1,12 @@
 /* =========================================================
    RESIDENT SLUG - Survival Horror (Canvas 2D)
-   - 10 niveles
-   - Enemigos distintos con ataques distintos
-   - Jefe final (nivel 10)
-   - Puerta: "CERRADO" -> "SALIDA (E)"
-   - WASD mover, Mouse apuntar, Click/Space disparar, R recargar, H curar, E puerta
-   - W = BRINCAR, S = AGACHARSE (NEW)
-   - Player run animation (3 frames) + flip L/R (NEW)
-   - Sangre + impactos (NEW)
-   - HUD estilo Metal Slug + minimapa + contador de objetivos (NEW)
-   - Fix: nunca te quedas sin enemigos antes de cumplir objetivos (NEW)
+   FIXES:
+   - No desapareces al cambiar de nivel (cámara + HUD)
+   - resizeCanvas DPR correcto (SIN doble escala)
+   - Sprites escalados automáticamente por tamaño real
+   - Boss animado idle/attack/hurt
+   - Spawn Director: nunca te quedas sin enemigos antes del objetivo
+   - W = brincar, S = agacharse
 ========================================================= */
 
 // ===================== CANVAS =====================
@@ -17,17 +14,14 @@ const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d", { alpha: false });
 canvas.style.outline = "none";
 canvas.setAttribute("tabindex", "0");
-canvas.style.display = "block";
 
+// ✅ DPR correcto (como tu versión original)
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
   const r = canvas.getBoundingClientRect();
   canvas.width = Math.floor(r.width * dpr);
   canvas.height = Math.floor(r.height * dpr);
-
-  // transform correcto
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.scale(dpr, dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
@@ -48,7 +42,7 @@ function setText(el, v){ if(el) el.textContent = v; }
 
 // ===================== UTILS =====================
 const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
-const rand = (a,b)=>Math.random()*(b-a)+a;
+const rand  = (a,b)=>Math.random()*(b-a)+a;
 
 function aabb(a,b){
   return !(a.x+a.w<=b.x || a.x>=b.x+b.w || a.y+a.h<=b.y || a.y>=b.y+b.h);
@@ -61,20 +55,31 @@ function norm(x,y){
 // ===================== ASSETS =====================
 const ASSETS = {
   bg:      { src:"img/Fondo.png" },
-  idle:    { src:"img/player.png" },
 
-  // ✅ tus 3 frames de correr
-  run1:    { src:"img/run1.png" },
-  run2:    { src:"img/run2.png" },
-  run3:    { src:"img/run3.png" },
+  // Player
+  idle:     { src:"img/player.png" },
+  runR:     { src:"img/run_right.png" },
+  runL:     { src:"img/run_left.png" },
+  crouch:   { src:"img/agachada.png" },
+  jump:     { src:"img/jumping.png" },
+  hurt:     { src:"img/damage.png" },
+  injured:  { src:"img/lastimada.png" },
+  defeated: { src:"img/defeated.png" },
+  shoot:    { src:"img/shoot.png" },
 
-  muzzle:  { src:"img/Balas.png" },              // 3 frames horiz
-  z_basic: { src:"img/zombie.png" },
-  z_green: { src:"img/zombie verde.png" },
-  z_white: { src:"img/zombie blanco.png" },
-  dog:     { src:"img/perro.png" },
-  spider:  { src:"img/zombie araña.png" },
-  boss:    { src:"img/jefe final.png" },
+  muzzle:   { src:"img/Balas.png" }, // 3 frames horiz
+
+  // Enemies
+  z_basic:  { src:"img/zombie.png" },
+  z_green:  { src:"img/zombie verde.png" },
+  z_white:  { src:"img/zombie blanco.png" },
+  dog:      { src:"img/perro.png" },
+  spider:   { src:"img/zombie araña.png" },
+
+  // Boss animado
+  boss_idle:   { src:"img/boss_idle.png" },
+  boss_attack: { src:"img/boss_attack.png" },
+  boss_hurt:   { src:"img/boss_hurt.png" },
 };
 
 const GFX = {};
@@ -113,15 +118,12 @@ function initAudio(){
   musicGain.gain.value = 0.18;
   musicGain.connect(master);
 }
-
 function setMuted(m){
   muted = m;
   if(master) master.gain.value = muted ? 0 : 0.9;
-
   if(btnMute) btnMute.textContent = muted ? "Activar sonido" : "Mute";
   if(muted) stopMusic(); else startMusic();
 }
-
 function beep({f=440,d=0.08,type="square",g=0.20,slide=null,bus="sfx"}={}){
   if(!audioCtx || muted) return;
   const o = audioCtx.createOscillator();
@@ -141,7 +143,6 @@ function beep({f=440,d=0.08,type="square",g=0.20,slide=null,bus="sfx"}={}){
   o.start(t0);
   o.stop(t0 + d);
 }
-
 function noisePop(d=0.08,g=0.20){
   if(!audioCtx || muted) return;
   const n = Math.floor(audioCtx.sampleRate * d);
@@ -156,30 +157,19 @@ function noisePop(d=0.08,g=0.20){
   gg.connect(sfxGain);
   src.start();
 }
-
 const SFX = {
   shoot(){ beep({f:980,slide:520,d:0.05,type:"square",g:0.22}); },
   reload(){ beep({f:260,slide:420,d:0.12,type:"sine",g:0.20}); },
   heal(){ beep({f:520,slide:920,d:0.15,type:"triangle",g:0.18}); },
   hit(){ beep({f:140,slide:90,d:0.10,type:"sawtooth",g:0.20}); noisePop(0.05,0.18); },
   dead(){ noisePop(0.10,0.28); beep({f:120,slide:70,d:0.16,type:"sawtooth",g:0.16}); },
-  step(){ beep({f:90,d:0.03,type:"sine",g:0.05}); },
-  zombie(){
-    beep({ f: 110, d: 0.10, type:"sawtooth", g:0.16 });
-    beep({ f: 90, d: 0.14, type:"triangle", g:0.14 });
-    noisePop(0.06, 0.18);
-  },
-  boss(){
-    beep({ f: 70, d: 0.22, type:"sawtooth", g:0.18 });
-    beep({ f: 55, d: 0.26, type:"triangle", g:0.14 });
-    noisePop(0.10, 0.22);
-  },
+  zombie(){ beep({ f: 110, d: 0.10, type:"sawtooth", g:0.16 }); noisePop(0.06, 0.18); },
+  boss(){ beep({ f: 70, d: 0.22, type:"sawtooth", g:0.18 }); noisePop(0.10, 0.22); },
   spit(){ beep({f:340,slide:210,d:0.12,type:"square",g:0.18}); },
   web(){ beep({f:380,slide:140,d:0.14,type:"triangle",g:0.18}); },
   bark(){ beep({f:220,slide:160,d:0.10,type:"sawtooth",g:0.16}); },
   door(){ beep({f:520,slide:740,d:0.10,type:"sine",g:0.16}); }
 };
-
 function startMusic(){
   if(!audioCtx || muted || musicOn) return;
   musicOn = true;
@@ -213,7 +203,6 @@ function startMusic(){
   o1.start(); o2.start(); tick();
   musicNodes=[o1,o2,f,g1,g2];
 }
-
 function stopMusic(){
   musicOn=false;
   try{ for(const n of musicNodes) if(n && typeof n.stop==="function") n.stop(); }catch{}
@@ -228,8 +217,6 @@ let gameOver = false;
 let victory = false;
 
 let interactPressed = false;
-
-// NEW: salto por “evento”, no por hold
 let jumpQueued = false;
 
 function isSpaceKey(e){
@@ -239,11 +226,7 @@ function isSpaceKey(e){
 
 document.addEventListener("keydown",(e)=>{
   const k = (e.key || "").toLowerCase();
-
-  if(isSpaceKey(e) || ["arrowup","arrowdown","arrowleft","arrowright","tab"].includes(k)) {
-    e.preventDefault();
-  }
-
+  if(isSpaceKey(e) || ["arrowup","arrowdown","arrowleft","arrowright","tab"].includes(k)) e.preventDefault();
   keys.add(k);
 
   if(k==="p") togglePause();
@@ -252,10 +235,7 @@ document.addEventListener("keydown",(e)=>{
   if(k==="h") heal();
   if(k==="e") interactPressed = true;
 
-  // ✅ W = brincar
   if(k==="w" || k==="arrowup") jumpQueued = true;
-
-  // ✅ Space dispara
   if(isSpaceKey(e)) shoot();
 },{passive:false});
 
@@ -273,7 +253,6 @@ canvas.addEventListener("mousemove",(e)=>{
 canvas.addEventListener("mousedown",(e)=>{
   mouse.down = true;
   canvas.focus();
-
   if(paused){
     startGame();
     return;
@@ -316,15 +295,23 @@ let drops = [];
 let fx = [];
 
 let exitDoor = { x: WORLD_W - 280, y: 0, w: 110, h: 140, active: false };
-
-// NEW: perfil de spawns por nivel
 let waveProfile = null;
+
+// ✅ tamaños automáticos (se llenan cuando cargan imágenes)
+const SPR = {
+  playerH: 96,
+  playerW: 70,
+  crouchH: 64,
+
+  // alturas objetivo por tipo
+  zH: { basic: 110, spitter: 118, tongue: 118, dog: 92, spider: 110, flyer: 98, boss: 220 }
+};
 
 const player = {
   x: 120, y: 0,
-  w: 54, h: 64,
-  baseH: 64,
-  crouchH: 44,
+  w: 70, h: 96,
+  baseH: 96,
+  crouchH: 64,
   isCrouch: false,
 
   vx: 0, vy: 0,
@@ -335,42 +322,72 @@ const player = {
   aim: {ax:1, ay:0},
   facing: 1,
 
-  // NEW: anim run
-  animT: 0,
+  hurtT: 0,
+  shootT: 0,
 };
 
 let ammo = { mag: 18, maxMag: 18, reserve: 120 };
 let medkits = 2;
 
-// ===================== LEVEL TABLE =====================
+// ===================== AUTO SIZE HELPERS =====================
+function sizeFromImage(imgKey, targetH, fallbackW=80){
+  const img = GFX[imgKey];
+  if(!img || !img.width || !img.height){
+    return { w: fallbackW, h: targetH };
+  }
+  const aspect = img.width / img.height;
+  const w = Math.round(targetH * aspect);
+  return { w, h: targetH };
+}
+function initSpriteMetrics(){
+  // player: usa runR si existe, si no idle
+  const base = sizeFromImage(GFX.runR ? "runR" : "idle", 96, 70);
+  SPR.playerH = clamp(base.h, 84, 120);
+  SPR.playerW = clamp(base.w, 60, 110);
+  SPR.crouchH = Math.round(SPR.playerH * 0.68);
+
+  player.w = SPR.playerW;
+  player.h = SPR.playerH;
+  player.baseH = SPR.playerH;
+  player.crouchH = SPR.crouchH;
+  player.y = groundY() - player.h;
+}
+
+// ===================== LEVELS =====================
 const LEVELS = [
-  { goal: 8,  wave: { basic:6, spitter:1, dog:0, tongue:0, spider:0, flyer:0 } },
-  { goal: 10, wave: { basic:6, spitter:2, dog:1, tongue:0, spider:0, flyer:0 } },
-  { goal: 12, wave: { basic:6, spitter:3, dog:1, tongue:1, spider:0, flyer:0 } },
-  { goal: 14, wave: { basic:6, spitter:3, dog:2, tongue:1, spider:1, flyer:0 } },
-  { goal: 16, wave: { basic:7, spitter:4, dog:2, tongue:2, spider:1, flyer:0 } },
-  { goal: 18, wave: { basic:7, spitter:4, dog:3, tongue:2, spider:2, flyer:0 } },
-  { goal: 20, wave: { basic:8, spitter:5, dog:3, tongue:2, spider:2, flyer:1 } },
-  { goal: 22, wave: { basic:8, spitter:5, dog:4, tongue:3, spider:2, flyer:2 } },
-  { goal: 24, wave: { basic:9, spitter:6, dog:4, tongue:3, spider:3, flyer:3 } },
-  { goal: 999, wave: { boss:1 } }, // boss
+  { goal: 10, wave: { basic: 10 } },
+  { goal: 12, wave: { basic: 8, spitter: 4 } },
+  { goal: 14, wave: { basic: 8, spitter: 4, dog: 2 } },
+  { goal: 16, wave: { basic: 8, spitter: 4, dog: 2, tongue: 2 } },
+  { goal: 18, wave: { basic: 7, spitter: 5, dog: 2, tongue: 2, spider: 2 } },
+  { goal: 20, wave: { basic: 6, spitter: 6, dog: 3, tongue: 2, spider: 3 } },
+  { goal: 22, wave: { basic: 6, spitter: 6, dog: 3, tongue: 2, spider: 3, flyer: 2 } },
+  { goal: 24, wave: { basic: 6, spitter: 7, dog: 3, tongue: 3, spider: 3, flyer: 3 } },
+  { goal: 26, wave: { basic: 6, spitter: 8, dog: 4, tongue: 3, spider: 4, flyer: 4 } },
+  { goal: 999, wave: { boss: 1 } },
 ];
 
 // ===================== SPAWN =====================
 function enemyTemplate(type){
-  const T = {
-    basic:  { img:"z_basic",  w:70,h:78, hp:55,  sp:1.1,  dmg:10, flyer:false },
-    spitter:{ img:"z_green",  w:84,h:84, hp:70,  sp:0.9,  dmg:10, flyer:false },
-    tongue: { img:"z_white",  w:78,h:88, hp:80,  sp:0.85, dmg:12, flyer:false },
-    dog:    { img:"dog",      w:92,h:62, hp:55,  sp:2.3,  dmg:14, flyer:false },
-    spider: { img:"spider",   w:92,h:80, hp:70,  sp:1.6,  dmg:12, flyer:false },
-    flyer:  { img:"spider",   w:82,h:72, hp:60,  sp:1.5,  dmg:10, flyer:true  },
-    boss:   { img:"boss",     w:190,h:180,hp:900, sp:0.85, dmg:18, flyer:false, boss:true },
-  };
-  return T[type];
+  // ✅ tamaño por sprite real (target height depende del zombie)
+  const h = SPR.zH[type] ?? 110;
+
+  const base = {
+    basic:   { img:"z_basic",  hp:55,  sp:1.1,  dmg:10, flyer:false },
+    spitter: { img:"z_green",  hp:70,  sp:0.9,  dmg:10, flyer:false },
+    tongue:  { img:"z_white",  hp:80,  sp:0.85, dmg:12, flyer:false },
+    dog:     { img:"dog",      hp:55,  sp:2.3,  dmg:14, flyer:false },
+    spider:  { img:"spider",   hp:70,  sp:1.6,  dmg:12, flyer:false },
+    flyer:   { img:"spider",   hp:60,  sp:1.5,  dmg:10, flyer:true  },
+    boss:    { img:"boss_idle",hp:980, sp:0.9,  dmg:18, flyer:false, boss:true },
+  }[type];
+
+  if(!base) return null;
+
+  const sz = sizeFromImage(base.img, h, Math.round(h*0.9));
+  return { ...base, w: sz.w, h: sz.h };
 }
 
-// NEW: pick random enemy type from waveProfile (weighted)
 function pickEnemyTypeFromProfile(profile){
   const entries = Object.entries(profile || {}).filter(([k,v])=>v>0 && k!=="boss");
   if(entries.length===0) return "basic";
@@ -404,23 +421,21 @@ function spawnEnemy(type){
     flyer: !!T.flyer,
     boss: !!T.boss,
 
-    nextAtk: performance.now() + rand(600, 1400),
-    atkCD: rand(900, 1500),
-    nextSound: performance.now() + rand(700, 1500),
+    attackT: 0,
+    hurtT: 0,
+    enraged: false,
 
+    nextAtk: performance.now() + rand(600, 1400),
+    nextSound: performance.now() + rand(700, 1500),
     bob: rand(0, Math.PI*2),
   });
 }
 
-// NEW: director de spawn (evita quedarte sin enemigos)
 function spawnDirector(){
-  if(level >= 10) return; // boss level se maneja distinto
+  if(level >= 10) return;
   if(killsThisLevel >= killGoal) return;
 
-  // cuántos enemigos vivos quieres al mismo tiempo (sube con nivel)
-  const aliveTarget = clamp(3 + Math.floor(level/2), 3, 10);
-
-  // si hay muy pocos enemigos, spawnea
+  const aliveTarget = clamp(4 + Math.floor(level/2), 4, 11);
   if(enemies.length < aliveTarget){
     const need = aliveTarget - enemies.length;
     for(let i=0;i<need;i++){
@@ -437,26 +452,14 @@ function spawnWave(lvl){
   killsThisLevel = 0;
   waveProfile = row.wave;
 
-  // boss
   if(row.wave.boss){
-    const T = enemyTemplate("boss");
-    enemies.push({
-      type:"boss", imgKey:"boss",
-      x: WORLD_W - 980, y: groundY() - T.h, w:T.w, h:T.h,
-      vx: -0.9, vy: 0,
-      hp: T.hp, maxHp: T.hp,
-      sp: T.sp, dmg: T.dmg,
-      flyer:false, boss:true,
-      nextAtk: performance.now()+900,
-      atkCD: 600,
-      nextSound: performance.now()+700,
-      bob: 0
-    });
+    spawnEnemy("boss");
+    enemies[0].x = WORLD_W - 980;
+    enemies[0].y = groundY() - enemies[0].h;
     return;
   }
 
-  // arranque: spawnea pocos y luego el director mantiene
-  const aliveTarget = clamp(3 + Math.floor(lvl/2), 3, 10);
+  const aliveTarget = clamp(4 + Math.floor(lvl/2), 4, 11);
   for(let i=0;i<aliveTarget;i++){
     spawnEnemy(pickEnemyTypeFromProfile(waveProfile));
   }
@@ -464,16 +467,12 @@ function spawnWave(lvl){
 
 function spawnDrop(x,y){
   const r = Math.random();
-  if(r < 0.45){
-    drops.push({kind:"ammo", x, y, w:26, h:20});
-  } else if(r < 0.80){
-    drops.push({kind:"med", x, y, w:22, h:22});
-  } else {
-    drops.push({kind:"kit", x, y, w:22, h:22});
-  }
+  if(r < 0.45) drops.push({kind:"ammo", x, y, w:26, h:20});
+  else if(r < 0.80) drops.push({kind:"med", x, y, w:22, h:22});
+  else drops.push({kind:"kit", x, y, w:22, h:22});
 }
 
-// ===================== AIM / CURSOR =====================
+// ===================== AIM =====================
 function updateAim(){
   const px = (player.x - cameraX) + player.w*0.55;
   const py = player.y + player.h*0.40;
@@ -485,12 +484,11 @@ function updateAim(){
   player.facing = (v.x >= 0) ? 1 : -1;
 }
 
-// ===================== SHOOT / RELOAD / HEAL =====================
+// ===================== ACTIONS =====================
 let lastShot = 0;
 
 function shoot(){
   if(paused || gameOver) return;
-
   const t = performance.now();
   if(t - lastShot < 115) return;
 
@@ -502,23 +500,18 @@ function shoot(){
   lastShot = t;
   ammo.mag--;
   SFX.shoot();
+  player.shootT = 6;
 
   updateAim();
 
   const sx = player.x + player.w*0.55;
   const sy = player.y + player.h*0.40;
 
-  fx.push({
-    kind: "muzzle",
-    x: sx + player.aim.ax * 18,
-    y: sy + player.aim.ay * 18,
-    life: 10
-  });
+  fx.push({ kind:"muzzle", x: sx + player.aim.ax * 18, y: sy + player.aim.ay * 18, life: 10 });
 
   const speed = 13.8;
   bullets.push({
-    x: sx,
-    y: sy,
+    x: sx, y: sy,
     vx: player.aim.ax * speed,
     vy: player.aim.ay * speed,
     r: 3,
@@ -545,14 +538,12 @@ function heal(){
   if(player.hp >= player.maxHp) return;
 
   medkits--;
-  const amount = 28;
-  player.hp = clamp(player.hp + amount, 0, player.maxHp);
+  player.hp = clamp(player.hp + 28, 0, player.maxHp);
   SFX.heal();
-
   fx.push({kind:"heal", x: player.x + player.w/2, y: player.y + 10, life: 26});
 }
 
-// ===================== BLOOD / IMPACT FX (NEW) =====================
+// ===================== FX (blood/impact) =====================
 function spawnBlood(x,y,amount=10){
   for(let i=0;i<amount;i++){
     fx.push({
@@ -583,8 +574,7 @@ function enemyAttack(e){
   const t = performance.now();
 
   if(t > e.nextSound){
-    if(e.boss) SFX.boss();
-    else SFX.zombie();
+    if(e.boss) SFX.boss(); else SFX.zombie();
     e.nextSound = t + rand(900, 1700);
   }
 
@@ -593,7 +583,7 @@ function enemyAttack(e){
   const dist = Math.hypot(dx,dy);
 
   if(e.type === "basic"){
-    if(dist < 62){
+    if(dist < 70){
       damagePlayer(e.dmg);
       spawnImpact(player.x+player.w/2, player.y+player.h*0.5);
       spawnBlood(player.x+player.w/2, player.y+player.h*0.55, 6);
@@ -602,32 +592,32 @@ function enemyAttack(e){
     return;
   }
 
-  if(e.type === "spitter"){
-    if(dist < 780){
+  if(e.type === "spitter" || e.type === "flyer"){
+    if(dist < 860){
       const v = norm(dx, dy);
       enemyBullets.push({
         kind:"spit",
         x: e.x + e.w*0.55,
-        y: e.y + e.h*0.45,
-        vx: v.x * 6.6,
-        vy: v.y * 6.6,
+        y: e.y + e.h*0.50,
+        vx: v.x * 6.7,
+        vy: v.y * 6.7,
         r: 6,
-        life: 140,
+        life: 150,
         dmg: 10 + Math.floor(level*0.6),
       });
       SFX.spit();
-      e.nextAtk = t + 1100;
-    } else e.nextAtk = t + 500;
+      e.nextAtk = t + (e.type==="flyer" ? 950 : 1100);
+    } else e.nextAtk = t + 520;
     return;
   }
 
   if(e.type === "tongue"){
-    if(dist < 320){
+    if(dist < 340){
       const v = norm(dx, dy);
       enemyBullets.push({
         kind:"tongue",
         x: e.x + e.w*0.55,
-        y: e.y + e.h*0.45,
+        y: e.y + e.h*0.50,
         vx: v.x * 10.2,
         vy: v.y * 10.2,
         r: 4,
@@ -636,72 +626,55 @@ function enemyAttack(e){
       });
       SFX.web();
       e.nextAtk = t + 1050;
-    } else e.nextAtk = t + 520;
+    } else e.nextAtk = t + 560;
     return;
   }
 
   if(e.type === "dog"){
-    if(dist < 520){
+    if(dist < 540){
       const dir = dx>=0 ? 1 : -1;
-      e.vx = dir * 5.8;
+      e.vx = dir * 6.0;
       e.vy = -2.2;
       SFX.bark();
       e.nextAtk = t + 900;
-    } else e.nextAtk = t + 500;
+    } else e.nextAtk = t + 520;
     return;
   }
 
   if(e.type === "spider"){
-    if(dist < 560){
+    if(dist < 580){
       const v = norm(dx, dy);
       e.vx = v.x * 4.2;
       e.vy = -8.6;
       SFX.web();
       e.nextAtk = t + 1200;
-    } else e.nextAtk = t + 600;
-    return;
-  }
-
-  if(e.type === "flyer"){
-    if(dist < 860){
-      const v = norm(dx, dy);
-      enemyBullets.push({
-        kind:"spit",
-        x: e.x + e.w*0.55,
-        y: e.y + e.h*0.55,
-        vx: v.x * 6.9,
-        vy: v.y * 6.9,
-        r: 6,
-        life: 160,
-        dmg: 10 + Math.floor(level*0.7),
-      });
-      SFX.spit();
-      e.nextAtk = t + 950;
-    } else e.nextAtk = t + 480;
+    } else e.nextAtk = t + 640;
     return;
   }
 
   if(e.type === "boss"){
-    if(dist < 1200){
+    if(dist < 1500){
+      e.attackT = 16;
       const v = norm(dx, dy);
       enemyBullets.push({
         kind:"cannon",
-        x: e.x + e.w*0.25,
-        y: e.y + e.h*0.55,
-        vx: v.x * 7.2,
-        vy: v.y * 7.2,
-        r: 10,
-        life: 170,
-        dmg: 18,
+        x: e.x + e.w*0.20,
+        y: e.y + e.h*0.52,
+        vx: v.x * (e.enraged ? 8.2 : 7.2),
+        vy: v.y * (e.enraged ? 8.2 : 7.2),
+        r: 12,
+        life: 190,
+        dmg: e.enraged ? 22 : 18,
       });
       SFX.boss();
     }
 
-    if(Math.random() < 0.30 && enemies.length < 18){
+    if(Math.random() < (e.enraged ? 0.45 : 0.30) && enemies.length < 18){
       spawnEnemy("basic");
       spawnEnemy("spitter");
     }
-    e.nextAtk = t + 650;
+
+    e.nextAtk = t + (e.enraged ? 520 : 650);
   }
 }
 
@@ -710,6 +683,7 @@ function damagePlayer(dmg){
   if(player.inv>0) return;
   player.hp -= dmg;
   player.inv = 18;
+  player.hurtT = 12;
   SFX.hit();
 
   if(player.hp <= 0){
@@ -724,16 +698,19 @@ function damagePlayer(dmg){
 
 function damageEnemy(e, dmg, hitX, hitY){
   e.hp -= dmg;
+  spawnImpact(hitX, hitY);
+  spawnBlood(hitX, hitY, e.boss ? 20 : 10);
   SFX.hit();
 
-  // NEW impact + blood
-  spawnImpact(hitX, hitY);
-  spawnBlood(hitX, hitY, e.boss ? 18 : 10);
+  if(e.boss){
+    e.hurtT = 12;
+    if(e.hp / e.maxHp <= 0.35) e.enraged = true;
+  }
 
   if(e.hp <= 0){
     e.hp = 0;
     killsThisLevel++;
-    score += e.boss ? 1400 : 140;
+    score += e.boss ? 2000 : 140;
     spawnDrop(e.x+e.w/2, e.y+e.h*0.5);
     SFX.dead();
     e.dead = true;
@@ -753,36 +730,22 @@ const MAX_FALL = 16;
 
 function isGrounded(){
   const gy = groundY() - player.h;
-  return Math.abs(player.y - gy) < 0.001 && Math.abs(player.vy) < 0.001;
+  return Math.abs(player.y - gy) < 0.01 && Math.abs(player.vy) < 0.01;
 }
-
 function applyCrouch(){
-  // ✅ S = agacharse solo en el piso
-  const wantCrouch = (keys.has("s") || keys.has("arrowdown")) && isGrounded();
-  if(wantCrouch === player.isCrouch) return;
-
-  player.isCrouch = wantCrouch;
-  const oldH = player.h;
-  player.h = wantCrouch ? player.crouchH : player.baseH;
-
-  // mantener pies en piso cuando cambia altura
-  const gyNew = groundY() - player.h;
-  player.y = gyNew;
-
-  // compensar si cambiaste en el aire (por seguridad)
-  if(!isGrounded()){
-    player.y += (oldH - player.h);
-  }
+  const want = (keys.has("s") || keys.has("arrowdown")) && isGrounded();
+  if(want === player.isCrouch) return;
+  player.isCrouch = want;
+  player.h = want ? player.crouchH : player.baseH;
+  player.y = groundY() - player.h;
 }
 
 function stepPlayer(){
   const left  = keys.has("a") || keys.has("arrowleft");
   const right = keys.has("d") || keys.has("arrowright");
 
-  // crouch primero
   applyCrouch();
 
-  // movimiento horizontal (crouch más lento)
   let ax = 0;
   if(left) ax -= 1;
   if(right) ax += 1;
@@ -793,7 +756,6 @@ function stepPlayer(){
   player.vx *= 0.82;
   player.vx = clamp(player.vx, -player.speed*spMul, player.speed*spMul);
 
-  // ✅ salto
   if(jumpQueued){
     jumpQueued = false;
     if(isGrounded() && !player.isCrouch){
@@ -802,32 +764,23 @@ function stepPlayer(){
     }
   }
 
-  // gravedad
   player.vy += GRAV;
   player.vy = clamp(player.vy, -14, MAX_FALL);
 
   player.x += player.vx;
   player.y += player.vy;
 
-  // límites mundo
   player.x = clamp(player.x, 0, WORLD_W - player.w);
 
-  // piso
   const gy = groundY() - player.h;
   if(player.y > gy){
     player.y = gy;
     player.vy = 0;
   }
 
-  // anim timer
-  const moving = Math.abs(player.vx) > 0.35;
-  if(moving && isGrounded() && !player.isCrouch){
-    player.animT += 1;
-  } else {
-    player.animT = 0;
-  }
-
   if(player.inv>0) player.inv--;
+  if(player.hurtT>0) player.hurtT--;
+  if(player.shootT>0) player.shootT--;
 }
 
 function stepEnemies(){
@@ -836,6 +789,8 @@ function stepEnemies(){
     if(e.dead) continue;
 
     e.bob += 0.10;
+    if(e.attackT>0) e.attackT--;
+    if(e.hurtT>0) e.hurtT--;
 
     const px = player.x + player.w*0.5;
     const ex = e.x + e.w*0.5;
@@ -857,6 +812,11 @@ function stepEnemies(){
         e.vx += dir * 0.10;
         e.vx = clamp(e.vx, -e.sp, e.sp);
         e.vx *= 0.90;
+      } else if(e.type==="boss"){
+        const sp = e.enraged ? (e.sp*1.15) : e.sp;
+        e.vx += dir * 0.05;
+        e.vx = clamp(e.vx, -sp, sp);
+        e.vx *= 0.95;
       } else {
         e.vx += dir * 0.06;
         e.vx = clamp(e.vx, -e.sp, e.sp);
@@ -873,10 +833,9 @@ function stepEnemies(){
       }
     }
 
-    // contacto
     if(!e.flyer && aabb(player, e)){
       damagePlayer(e.dmg);
-      spawnBlood(player.x+player.w/2, player.y+player.h*0.6, 5);
+      spawnBlood(player.x+player.w/2, player.y+player.h*0.6, 6);
     }
 
     if(t > e.nextAtk){
@@ -888,7 +847,6 @@ function stepEnemies(){
 }
 
 function stepBullets(){
-  // player bullets
   for(const b of bullets){
     b.x += b.vx;
     b.y += b.vy;
@@ -905,18 +863,16 @@ function stepBullets(){
   }
   bullets = bullets.filter(b=>b.life>0 && b.x>-100 && b.x<WORLD_W+100 && b.y>-100 && b.y<H()+100);
 
-  // enemy bullets
   for(const b of enemyBullets){
     b.x += b.vx;
     b.y += b.vy;
     b.life--;
-
     if(b.kind==="spit") b.vy += 0.02;
 
     if(b.x > player.x && b.x < player.x+player.w && b.y > player.y && b.y < player.y+player.h){
       damagePlayer(b.dmg);
       spawnImpact(b.x, b.y);
-      spawnBlood(b.x, b.y, 6);
+      spawnBlood(b.x, b.y, 7);
       b.life = 0;
     }
   }
@@ -951,13 +907,10 @@ function stepDrops(){
 function stepFX(){
   for(const p of fx){
     p.life--;
-
-    // NEW particles move
     if(p.kind==="blood" || p.kind==="spark"){
       p.x += p.vx;
       p.y += p.vy;
       p.vy += (p.kind==="blood" ? 0.22 : 0.18);
-      // rebotito suelo
       const gy = groundY()-2;
       if(p.y > gy){
         p.y = gy;
@@ -986,25 +939,22 @@ function setupExit(){
   exitDoor.y = groundY() - exitDoor.h;
   exitDoor.active = false;
 }
-
 function updateExit(){
-  if(level < 10){
-    exitDoor.active = (killsThisLevel >= killGoal);
-  } else {
-    exitDoor.active = (enemies.length === 0);
-  }
-
+  exitDoor.active = (level < 10) ? (killsThisLevel >= killGoal) : (enemies.length === 0);
   if(!exitDoor.active) return;
 
-  const near = aabb(player, exitDoor);
-
-  if(near && interactPressed){
+  if(aabb(player, exitDoor) && interactPressed){
     interactPressed = false;
     SFX.door();
 
+    // ✅ limpiar estado al cambiar nivel
+    bullets.length = 0;
+    enemyBullets.length = 0;
+    drops.length = 0;
+    fx.length = 0;
+
     if(level < MAX_LEVELS){
-      level++;
-      setupLevel(level);
+      setupLevel(level + 1);
     } else {
       gameOver = true;
       victory = true;
@@ -1021,7 +971,6 @@ function updateHigh(){
     localStorage.setItem("rs_high", String(high));
   }
 }
-
 function updateTopUI(){
   setText(uiLvl, level);
   setText(uiScore, score);
@@ -1042,10 +991,7 @@ function drawBackground(){
       ctx.drawImage(img, x, 0, img.width, h);
     }
   } else {
-    const g = ctx.createLinearGradient(0,0,0,h);
-    g.addColorStop(0,"#0b1220");
-    g.addColorStop(1,"#050713");
-    ctx.fillStyle=g;
+    ctx.fillStyle="#0b1220";
     ctx.fillRect(0,0,w,h);
   }
 
@@ -1053,32 +999,55 @@ function drawBackground(){
   ctx.fillRect(0, groundY(), w, FLOOR_H);
 }
 
+function drawCrosshair(){
+  const x = mouse.x, y = mouse.y;
+  ctx.save();
+  ctx.strokeStyle="rgba(255,255,255,0.85)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x-10,y); ctx.lineTo(x+10,y);
+  ctx.moveTo(x,y-10); ctx.lineTo(x,y+10);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawHealthBar(x,y,w,h,val,max,isPlayer){
+  const pct = clamp(val/max, 0, 1);
+  ctx.save();
+  ctx.fillStyle="rgba(0,0,0,0.55)";
+  ctx.fillRect(x,y,w,h);
+  ctx.fillStyle = isPlayer ? "rgba(34,197,94,0.95)" : "rgba(239,68,68,0.92)";
+  ctx.fillRect(x,y,w*pct,h);
+  ctx.strokeStyle="rgba(255,255,255,0.18)";
+  ctx.strokeRect(x,y,w,h);
+  ctx.restore();
+}
+
 function drawPlayer(){
   const x = Math.round(player.x - cameraX);
   const y = Math.round(player.y);
 
-  // elegir sprite según estado
-  let img = GFX.idle;
-
-  const moving = Math.abs(player.vx) > 0.35;
   const grounded = isGrounded();
+  const moving = Math.abs(player.vx) > 0.35;
 
-  if(player.isCrouch){
-    img = GFX.idle || null;
-  } else if(!grounded){
-    img = GFX.idle || null;
-  } else if(moving){
-    const frames = [GFX.run1, GFX.run2, GFX.run3].filter(Boolean);
-    if(frames.length){
-      const idx = Math.floor(player.animT / 6) % frames.length; // velocidad anim
-      img = frames[idx];
-    }
-  }
+  let img = null;
 
-  // dibujar con flip izquierda/derecha
+  if(gameOver && !victory) img = GFX.defeated || GFX.idle;
+  else if(player.hurtT > 0) img = GFX.hurt || GFX.idle;
+  else if(player.shootT > 0 && GFX.shoot) img = GFX.shoot;
+  else if(player.isCrouch) img = GFX.crouch || GFX.idle;
+  else if(!grounded) img = GFX.jump || GFX.idle;
+  else if(moving) img = (player.facing === -1) ? (GFX.runL || GFX.runR || GFX.idle) : (GFX.runR || GFX.runL || GFX.idle);
+  else if(player.hp <= 35 && GFX.injured) img = GFX.injured;
+  else img = GFX.idle;
+
   if(img){
     ctx.save();
-    if(player.facing === -1){
+    const shouldFlip =
+      (player.facing === -1) &&
+      (img === GFX.idle || img === GFX.jump || img === GFX.hurt || img === GFX.injured || img === GFX.shoot);
+
+    if(shouldFlip){
       ctx.translate(x + player.w, y);
       ctx.scale(-1, 1);
       ctx.drawImage(img, 0, 0, player.w, player.h);
@@ -1091,31 +1060,32 @@ function drawPlayer(){
     ctx.fillRect(x,y,player.w,player.h);
   }
 
-  // barra vida arriba del player
   drawHealthBar(x, y-10, player.w, 6, player.hp, player.maxHp, true);
-
   drawCrosshair();
 }
 
 function drawEnemies(){
   for(const e of enemies){
-    const img = GFX[e.imgKey];
     const x = Math.round(e.x - cameraX);
     const y = Math.round(e.y + (e.flyer ? Math.sin(e.bob)*2 : 0));
 
-    if(img){
-      ctx.drawImage(img, x, y, e.w, e.h);
-    } else {
-      ctx.fillStyle = "#7f1d1d";
-      ctx.fillRect(x,y,e.w,e.h);
+    let img = GFX[e.imgKey];
+
+    if(e.boss){
+      if(e.hurtT > 0) img = GFX.boss_hurt || GFX.boss_idle;
+      else if(e.attackT > 0) img = GFX.boss_attack || GFX.boss_idle;
+      else img = GFX.boss_idle || GFX.boss_attack;
     }
+
+    if(img) ctx.drawImage(img, x, y, e.w, e.h);
+    else { ctx.fillStyle="#7f1d1d"; ctx.fillRect(x,y,e.w,e.h); }
 
     drawHealthBar(x, y-10, e.w, 6, e.hp, e.maxHp, false);
 
     if(e.boss){
       ctx.fillStyle="rgba(255,255,255,0.92)";
       ctx.font="bold 14px Arial";
-      ctx.fillText("JEFE", x+10, y-18);
+      ctx.fillText(e.enraged ? "JEFE (ENRAGED)" : "JEFE", x+10, y-18);
     }
   }
 }
@@ -1168,7 +1138,6 @@ function drawFX(){
         const fw = Math.floor(img.width / frames);
         const fh = img.height;
         const idx = clamp(Math.floor((10 - p.life) / 3), 0, 2);
-
         const size = 52;
         ctx.save();
         ctx.translate(x, y);
@@ -1176,9 +1145,6 @@ function drawFX(){
         ctx.rotate(ang);
         ctx.drawImage(img, idx * fw, 0, fw, fh, -size/2, -size/2, size, size);
         ctx.restore();
-      } else {
-        ctx.fillStyle="rgba(250,204,21,0.85)";
-        ctx.beginPath(); ctx.arc(x,y,10,0,Math.PI*2); ctx.fill();
       }
       continue;
     }
@@ -1196,18 +1162,14 @@ function drawFX(){
     }
 
     if(p.kind==="blood"){
-      const a = clamp(p.life/42,0,1);
-      ctx.fillStyle = `rgba(220,38,38,${a})`;
-      ctx.beginPath();
-      ctx.arc(x, y, p.r, 0, Math.PI*2);
-      ctx.fill();
+      ctx.fillStyle = `rgba(220,38,38,${clamp(p.life/42,0,1)})`;
+      ctx.beginPath(); ctx.arc(x,y,p.r,0,Math.PI*2); ctx.fill();
       continue;
     }
 
     if(p.kind==="heal"){
-      const a = clamp(p.life/26,0,1);
-      ctx.fillStyle = `rgba(34,197,94,${a})`;
-      ctx.beginPath(); ctx.arc(x,y,16*(1.1-a),0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = `rgba(34,197,94,${clamp(p.life/26,0,1)})`;
+      ctx.beginPath(); ctx.arc(x,y,16,0,Math.PI*2); ctx.fill();
       continue;
     }
   }
@@ -1244,122 +1206,45 @@ function drawDoor(){
   }
 }
 
-// ✅ HUD estilo Metal Slug + contador objetivo
 function drawHUD(){
-  const w=W();
-
-  // panel superior izq
   ctx.save();
   ctx.fillStyle="rgba(0,0,0,0.40)";
-  ctx.fillRect(12, 12, 460, 96);
+  ctx.fillRect(12, 12, 520, 96);
   ctx.strokeStyle="rgba(255,255,255,0.10)";
-  ctx.strokeRect(12, 12, 460, 96);
+  ctx.strokeRect(12, 12, 520, 96);
 
   ctx.fillStyle="rgba(255,255,255,0.92)";
   ctx.font="bold 14px Arial";
   ctx.fillText(`Nivel: ${level}/10`, 24, 34);
 
   ctx.font="13px Arial";
-  ctx.fillText(`Objetivo (kills): ${killsThisLevel}/${killGoal===999?"BOSS":killGoal}`, 24, 54);
+  ctx.fillText(`Objetivo: ${killsThisLevel}/${killGoal===999?"BOSS":killGoal}`, 24, 54);
   ctx.fillText(`Munición: ${ammo.mag}/${ammo.maxMag}  |  Reserva: ${ammo.reserve}`, 24, 74);
-  ctx.fillText(`Medkits: ${medkits}`, 330, 74);
-
-  // barra HP pro
-  drawHealthBar(24, 84, 430, 10, player.hp, player.maxHp, true);
-  ctx.restore();
-
-  // minimapa
-  drawMiniMap(w - 220, 12, 200, 64);
-}
-
-function drawMiniMap(x,y,w,h){
-  ctx.save();
-  ctx.fillStyle="rgba(0,0,0,0.45)";
-  ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle="rgba(255,255,255,0.12)";
-  ctx.strokeRect(x, y, w, h);
-
-  const scale = w / WORLD_W;
-
-  // door
-  ctx.fillStyle = exitDoor.active ? "rgba(34,197,94,0.95)" : "rgba(255,255,255,0.35)";
-  ctx.fillRect(x + exitDoor.x * scale, y + h - 10, 4, 8);
-
-  // enemies
-  ctx.fillStyle="rgba(239,68,68,0.95)";
-  for(const e of enemies){
-    const ex = x + e.x * scale;
-    const ey = y + h - (e.flyer ? 24 : 10);
-    ctx.fillRect(ex, ey, 3, 3);
-  }
-
-  // player
-  ctx.fillStyle="rgba(250,204,21,0.95)";
-  ctx.fillRect(x + player.x * scale, y + h - 12, 4, 6);
-
-  ctx.restore();
-}
-
-function drawCrosshair(){
-  const x = mouse.x;
-  const y = mouse.y;
-  ctx.save();
-  ctx.strokeStyle="rgba(255,255,255,0.85)";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(x-10,y); ctx.lineTo(x+10,y);
-  ctx.moveTo(x,y-10); ctx.lineTo(x,y+10);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawHealthBar(x,y,w,h,val,max,isPlayer){
-  const pct = clamp(val/max, 0, 1);
-  ctx.save();
-  ctx.fillStyle="rgba(0,0,0,0.55)";
-  ctx.fillRect(x,y,w,h);
-  ctx.fillStyle = isPlayer ? "rgba(34,197,94,0.95)" : "rgba(239,68,68,0.92)";
-  ctx.fillRect(x,y,w*pct,h);
-  ctx.strokeStyle="rgba(255,255,255,0.18)";
-  ctx.strokeRect(x,y,w,h);
+  ctx.fillText(`Medkits: ${medkits}`, 430, 74);
+  drawHealthBar(24, 84, 490, 10, player.hp, player.maxHp, true);
   ctx.restore();
 }
 
 function drawEnd(){
   const w=W(), h=H();
+  ctx.save();
   ctx.fillStyle="rgba(0,0,0,0.78)";
   ctx.fillRect(0,0,w,h);
-
-  const cardW = Math.min(900, w*0.92);
-  const cardH = Math.min(460, h*0.70);
-  const x=(w-cardW)/2, y=(h-cardH)/2;
-
-  const g = ctx.createLinearGradient(x,y,x+cardW,y+cardH);
-  g.addColorStop(0,"rgba(20,28,45,0.96)");
-  g.addColorStop(1,"rgba(8,12,22,0.96)");
-  ctx.fillStyle=g;
-  ctx.fillRect(x,y,cardW,cardH);
-
-  ctx.strokeStyle="rgba(255,255,255,0.18)";
-  ctx.lineWidth=2;
-  ctx.strokeRect(x,y,cardW,cardH);
 
   ctx.fillStyle="rgba(255,255,255,0.95)";
   ctx.textAlign="center";
   ctx.font="bold 34px Arial";
-  ctx.fillText(victory ? "🏆 VICTORIA" : "☠ GAME OVER", w/2, y+56);
+  ctx.fillText(victory ? "🏆 VICTORIA" : "☠ GAME OVER", w/2, h/2 - 60);
 
   ctx.font="18px Arial";
-  ctx.textAlign="left";
-  ctx.fillText(`Nivel alcanzado: ${level}/10`, x+34, y+120);
-  ctx.fillText(`Score: ${score}`, x+34, y+152);
-  ctx.fillText(`High Score: ${high}`, x+34, y+184);
-  ctx.fillText(`Objetivo: ${killsThisLevel}/${killGoal===999?"BOSS":killGoal}`, x+34, y+216);
+  ctx.fillText(`Nivel alcanzado: ${level}/10`, w/2, h/2 - 18);
+  ctx.fillText(`Score: ${score}`, w/2, h/2 + 12);
+  ctx.fillText(`High Score: ${high}`, w/2, h/2 + 42);
 
-  ctx.textAlign="center";
   ctx.font="14px Arial";
   ctx.fillStyle="rgba(255,255,255,0.75)";
-  ctx.fillText("Click para reiniciar • R reiniciar • P pausa • M mute", w/2, y+cardH-28);
+  ctx.fillText("Click para reiniciar • R reiniciar • P pausa • M mute", w/2, h/2 + 90);
+  ctx.restore();
   ctx.textAlign="left";
 }
 
@@ -1374,13 +1259,11 @@ function step(){
   stepDrops();
   stepFX();
 
-  // ✅ NEW: mantiene enemigos hasta cumplir objetivo
   spawnDirector();
 
   updateCamera();
   updateExit();
   updateTopUI();
-
   if(score > high) updateHigh();
 }
 
@@ -1402,33 +1285,39 @@ function loop(){
   render();
 }
 
-// ===================== CONTROL =====================
+// ===================== LEVEL CONTROL =====================
 function setupLevel(lvl){
   level = lvl;
 
-  const baseMag = 18;
-  ammo.maxMag = baseMag + Math.floor((lvl-1)/2)*2;
+  // reset player
+  player.isCrouch = false;
+  player.h = player.baseH;
+  player.x = 120;
+  player.y = groundY() - player.h;
+  player.vx = 0;
+  player.vy = 0;
+  player.inv = 10;
+  player.hurtT = 0;
+  player.shootT = 0;
+
+  // refills suaves
+  ammo.maxMag = 18 + Math.floor((lvl-1)/2)*2;
   ammo.mag = ammo.maxMag;
   ammo.reserve += 40;
   medkits = clamp(medkits + 1, 0, 6);
   player.hp = clamp(player.hp + 18, 0, player.maxHp);
-  player.inv = 10;
-
-  player.x = 120;
-  player.h = player.baseH;
-  player.isCrouch = false;
-  player.y = groundY() - player.h;
-  player.vx = 0;
-  player.vy = 0;
-
-  bullets.length = 0;
-  enemyBullets.length = 0;
-  drops.length = 0;
-  fx.length = 0;
 
   spawnWave(lvl);
   setupExit();
   updateTopUI();
+
+  // ✅ FIX fuerte: cámara SIEMPRE vuelve al player
+  cameraVx = 0;
+  cameraX  = clamp(player.x - W()*0.40, 0, WORLD_W - W());
+
+  // ✅ FIX extra: por si se quedó pausado por algo
+  paused = false;
+  if(btnPause) btnPause.textContent = "Pausa";
 }
 
 async function startGame(){
@@ -1437,12 +1326,7 @@ async function startGame(){
   if(!muted) startMusic();
 
   paused = false;
-
-  if(overlay){
-    overlay.classList.add("hidden");
-    overlay.style.pointerEvents = "none";
-  }
-
+  if(overlay) overlay.classList.add("hidden");
   canvas.focus();
 }
 
@@ -1454,25 +1338,24 @@ function resetGame(){
   score = 0;
   killsThisLevel = 0;
 
+  bullets.length = 0;
+  enemyBullets.length = 0;
+  enemies.length = 0;
+  drops.length = 0;
+  fx.length = 0;
+
   ammo = { mag: 18, maxMag: 18, reserve: 120 };
   medkits = 2;
 
   player.hp = player.maxHp;
   player.inv = 0;
-  player.x = 120;
-  player.h = player.baseH;
-  player.isCrouch = false;
-  player.y = groundY() - player.h;
 
   cameraX = 0; cameraVx = 0;
 
   setupLevel(1);
   updateTopUI();
 
-  if(overlay){
-    overlay.classList.remove("hidden");
-    overlay.style.pointerEvents = "auto";
-  }
+  if(overlay) overlay.classList.remove("hidden");
 }
 
 function togglePause(){
@@ -1489,9 +1372,7 @@ function toggleMute(){
 
 // click en pantalla final reinicia
 canvas.addEventListener("click",()=>{
-  if(gameOver){
-    resetGame();
-  }
+  if(gameOver) resetGame();
 });
 
 // ===================== EVENTS =====================
@@ -1510,9 +1391,10 @@ if(volEl){
 // ===================== BOOT =====================
 (async function boot(){
   setText(uiHigh, high);
-  if(btnMute) btnMute.textContent = muted ? "Activar sonido" : "Mute";
-
   await loadAll();
+
+  // ✅ set sizes once images exist
+  initSpriteMetrics();
 
   resetGame();
   loop();
