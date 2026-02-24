@@ -5,21 +5,29 @@
    - Jefe final (nivel 10)
    - Puerta: "CERRADO" -> "SALIDA (E)"
    - WASD mover, Mouse apuntar, Click/Space disparar, R recargar, H curar, E puerta
-   - Balas.png (3 frames) animación muzzle
-   - Música + SFX (WebAudio)
+   - W = BRINCAR, S = AGACHARSE (NEW)
+   - Player run animation (3 frames) + flip L/R (NEW)
+   - Sangre + impactos (NEW)
+   - HUD estilo Metal Slug + minimapa + contador de objetivos (NEW)
+   - Fix: nunca te quedas sin enemigos antes de cumplir objetivos (NEW)
 ========================================================= */
 
 // ===================== CANVAS =====================
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d", { alpha: false });
 canvas.style.outline = "none";
+canvas.setAttribute("tabindex", "0");
+canvas.style.display = "block";
 
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
   const r = canvas.getBoundingClientRect();
   canvas.width = Math.floor(r.width * dpr);
   canvas.height = Math.floor(r.height * dpr);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // transform correcto
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
 }
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
@@ -41,10 +49,10 @@ function setText(el, v){ if(el) el.textContent = v; }
 // ===================== UTILS =====================
 const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
 const rand = (a,b)=>Math.random()*(b-a)+a;
+
 function aabb(a,b){
   return !(a.x+a.w<=b.x || a.x>=b.x+b.w || a.y+a.h<=b.y || a.y>=b.y+b.h);
 }
-function len(x,y){ return Math.hypot(x,y); }
 function norm(x,y){
   const L = Math.hypot(x,y) || 1;
   return {x:x/L, y:y/L};
@@ -53,7 +61,13 @@ function norm(x,y){
 // ===================== ASSETS =====================
 const ASSETS = {
   bg:      { src:"img/Fondo.png" },
-  player:  { src:"img/player.png" },
+  idle:    { src:"img/player.png" },
+
+  // ✅ tus 3 frames de correr
+  run1:    { src:"img/run1.png" },
+  run2:    { src:"img/run2.png" },
+  run3:    { src:"img/run3.png" },
+
   muzzle:  { src:"img/Balas.png" },              // 3 frames horiz
   z_basic: { src:"img/zombie.png" },
   z_green: { src:"img/zombie verde.png" },
@@ -78,7 +92,6 @@ async function loadAll(){
   for(const k in ASSETS) tasks.push(loadImage(k, ASSETS[k].src));
   await Promise.allSettled(tasks);
 }
-let assetsReady = false;
 
 // ===================== AUDIO (WebAudio) =====================
 let audioCtx=null, master=null, sfxGain=null, musicGain=null;
@@ -104,7 +117,8 @@ function initAudio(){
 function setMuted(m){
   muted = m;
   if(master) master.gain.value = muted ? 0 : 0.9;
-  if(btnMute) btnMute.textContent = muted ? "Mute" : "Sonido";
+
+  if(btnMute) btnMute.textContent = muted ? "Activar sonido" : "Mute";
   if(muted) stopMusic(); else startMusic();
 }
 
@@ -150,8 +164,7 @@ const SFX = {
   hit(){ beep({f:140,slide:90,d:0.10,type:"sawtooth",g:0.20}); noisePop(0.05,0.18); },
   dead(){ noisePop(0.10,0.28); beep({f:120,slide:70,d:0.16,type:"sawtooth",g:0.16}); },
   step(){ beep({f:90,d:0.03,type:"sine",g:0.05}); },
-
-  zombie(){ // gruñido
+  zombie(){
     beep({ f: 110, d: 0.10, type:"sawtooth", g:0.16 });
     beep({ f: 90, d: 0.14, type:"triangle", g:0.14 });
     noisePop(0.06, 0.18);
@@ -171,7 +184,6 @@ function startMusic(){
   if(!audioCtx || muted || musicOn) return;
   musicOn = true;
 
-  // “horror loop” simple
   const o1 = audioCtx.createOscillator();
   const o2 = audioCtx.createOscillator();
   const f = audioCtx.createBiquadFilter();
@@ -217,9 +229,21 @@ let victory = false;
 
 let interactPressed = false;
 
+// NEW: salto por “evento”, no por hold
+let jumpQueued = false;
+
+function isSpaceKey(e){
+  const k = (e.key || "").toLowerCase();
+  return e.key === " " || k === " " || k === "space" || k === "spacebar";
+}
+
 document.addEventListener("keydown",(e)=>{
-  const k = e.key.toLowerCase();
-  if([" ","arrowup","arrowdown","arrowleft","arrowright","tab"].includes(k)) e.preventDefault();
+  const k = (e.key || "").toLowerCase();
+
+  if(isSpaceKey(e) || ["arrowup","arrowdown","arrowleft","arrowright","tab"].includes(k)) {
+    e.preventDefault();
+  }
+
   keys.add(k);
 
   if(k==="p") togglePause();
@@ -227,10 +251,16 @@ document.addEventListener("keydown",(e)=>{
   if(k==="r") reload();
   if(k==="h") heal();
   if(k==="e") interactPressed = true;
+
+  // ✅ W = brincar
+  if(k==="w" || k==="arrowup") jumpQueued = true;
+
+  // ✅ Space dispara
+  if(isSpaceKey(e)) shoot();
 },{passive:false});
 
 document.addEventListener("keyup",(e)=>{
-  const k = e.key.toLowerCase();
+  const k = (e.key || "").toLowerCase();
   keys.delete(k);
   if(k==="e") interactPressed = false;
 });
@@ -243,6 +273,7 @@ canvas.addEventListener("mousemove",(e)=>{
 canvas.addEventListener("mousedown",(e)=>{
   mouse.down = true;
   canvas.focus();
+
   if(paused){
     startGame();
     return;
@@ -286,21 +317,32 @@ let fx = [];
 
 let exitDoor = { x: WORLD_W - 280, y: 0, w: 110, h: 140, active: false };
 
+// NEW: perfil de spawns por nivel
+let waveProfile = null;
+
 const player = {
-  x: 120, y: 0, w: 54, h: 64,
+  x: 120, y: 0,
+  w: 54, h: 64,
+  baseH: 64,
+  crouchH: 44,
+  isCrouch: false,
+
   vx: 0, vy: 0,
   hp: 100, maxHp: 100,
   inv: 0,
   speed: 4.2,
+
   aim: {ax:1, ay:0},
   facing: 1,
+
+  // NEW: anim run
+  animT: 0,
 };
 
 let ammo = { mag: 18, maxMag: 18, reserve: 120 };
 let medkits = 2;
 
 // ===================== LEVEL TABLE =====================
-// tipos: basic, spitter (verde), tongue (blanco), dog, spider (salto), flyer (araña voladora), boss
 const LEVELS = [
   { goal: 8,  wave: { basic:6, spitter:1, dog:0, tongue:0, spider:0, flyer:0 } },
   { goal: 10, wave: { basic:6, spitter:2, dog:1, tongue:0, spider:0, flyer:0 } },
@@ -311,12 +353,11 @@ const LEVELS = [
   { goal: 20, wave: { basic:8, spitter:5, dog:3, tongue:2, spider:2, flyer:1 } },
   { goal: 22, wave: { basic:8, spitter:5, dog:4, tongue:3, spider:2, flyer:2 } },
   { goal: 24, wave: { basic:9, spitter:6, dog:4, tongue:3, spider:3, flyer:3 } },
-  { goal: 999, wave: { boss:1 } }, // boss final
+  { goal: 999, wave: { boss:1 } }, // boss
 ];
 
 // ===================== SPAWN =====================
 function enemyTemplate(type){
-  // tamaños base (ajustados para sprite)
   const T = {
     basic:  { img:"z_basic",  w:70,h:78, hp:55,  sp:1.1,  dmg:10, flyer:false },
     spitter:{ img:"z_green",  w:84,h:84, hp:70,  sp:0.9,  dmg:10, flyer:false },
@@ -329,11 +370,25 @@ function enemyTemplate(type){
   return T[type];
 }
 
+// NEW: pick random enemy type from waveProfile (weighted)
+function pickEnemyTypeFromProfile(profile){
+  const entries = Object.entries(profile || {}).filter(([k,v])=>v>0 && k!=="boss");
+  if(entries.length===0) return "basic";
+  let sum = 0;
+  for(const [,w] of entries) sum += w;
+  let r = Math.random() * sum;
+  for(const [type,w] of entries){
+    r -= w;
+    if(r <= 0) return type;
+  }
+  return entries[0][0];
+}
+
 function spawnEnemy(type){
   const T = enemyTemplate(type);
   if(!T) return;
 
-  const x = rand(900, WORLD_W - 600);
+  const x = rand(Math.max(600, player.x+500), Math.min(WORLD_W - 600, player.x+1600));
   const y = T.flyer ? rand(90, groundY() - T.h - 180) : (groundY() - T.h);
 
   enemies.push({
@@ -349,14 +404,29 @@ function spawnEnemy(type){
     flyer: !!T.flyer,
     boss: !!T.boss,
 
-    // IA timers
     nextAtk: performance.now() + rand(600, 1400),
     atkCD: rand(900, 1500),
     nextSound: performance.now() + rand(700, 1500),
 
-    // anim "fake"
     bob: rand(0, Math.PI*2),
   });
+}
+
+// NEW: director de spawn (evita quedarte sin enemigos)
+function spawnDirector(){
+  if(level >= 10) return; // boss level se maneja distinto
+  if(killsThisLevel >= killGoal) return;
+
+  // cuántos enemigos vivos quieres al mismo tiempo (sube con nivel)
+  const aliveTarget = clamp(3 + Math.floor(level/2), 3, 10);
+
+  // si hay muy pocos enemigos, spawnea
+  if(enemies.length < aliveTarget){
+    const need = aliveTarget - enemies.length;
+    for(let i=0;i<need;i++){
+      spawnEnemy(pickEnemyTypeFromProfile(waveProfile));
+    }
+  }
 }
 
 function spawnWave(lvl){
@@ -365,10 +435,10 @@ function spawnWave(lvl){
   const row = LEVELS[lvl-1];
   killGoal = row.goal;
   killsThisLevel = 0;
+  waveProfile = row.wave;
 
   // boss
   if(row.wave.boss){
-    // boss fijo cerca del final
     const T = enemyTemplate("boss");
     enemies.push({
       type:"boss", imgKey:"boss",
@@ -385,14 +455,11 @@ function spawnWave(lvl){
     return;
   }
 
-  // normal waves
-  const w = row.wave;
-  for(let i=0;i<(w.basic||0);i++) spawnEnemy("basic");
-  for(let i=0;i<(w.spitter||0);i++) spawnEnemy("spitter");
-  for(let i=0;i<(w.tongue||0);i++) spawnEnemy("tongue");
-  for(let i=0;i<(w.dog||0);i++) spawnEnemy("dog");
-  for(let i=0;i<(w.spider||0);i++) spawnEnemy("spider");
-  for(let i=0;i<(w.flyer||0);i++) spawnEnemy("flyer");
+  // arranque: spawnea pocos y luego el director mantiene
+  const aliveTarget = clamp(3 + Math.floor(lvl/2), 3, 10);
+  for(let i=0;i<aliveTarget;i++){
+    spawnEnemy(pickEnemyTypeFromProfile(waveProfile));
+  }
 }
 
 function spawnDrop(x,y){
@@ -408,7 +475,6 @@ function spawnDrop(x,y){
 
 // ===================== AIM / CURSOR =====================
 function updateAim(){
-  // apunta desde el centro del jugador hacia mouse
   const px = (player.x - cameraX) + player.w*0.55;
   const py = player.y + player.h*0.40;
   const dx = mouse.x - px;
@@ -426,10 +492,9 @@ function shoot(){
   if(paused || gameOver) return;
 
   const t = performance.now();
-  if(t - lastShot < 115) return; // cadencia
+  if(t - lastShot < 115) return;
 
   if(ammo.mag <= 0){
-    // click sin balas => pequeño sonido + sugerencia
     beep({f:220,d:0.05,type:"sine",g:0.08});
     return;
   }
@@ -443,7 +508,6 @@ function shoot(){
   const sx = player.x + player.w*0.55;
   const sy = player.y + player.h*0.40;
 
-  // muzzle con Balas.png (3 frames)
   fx.push({
     kind: "muzzle",
     x: sx + player.aim.ax * 18,
@@ -451,7 +515,6 @@ function shoot(){
     life: 10
   });
 
-  // bala
   const speed = 13.8;
   bullets.push({
     x: sx,
@@ -489,35 +552,56 @@ function heal(){
   fx.push({kind:"heal", x: player.x + player.w/2, y: player.y + 10, life: 26});
 }
 
-// ===================== ENEMY ATTACKS (DISTINTOS) =====================
+// ===================== BLOOD / IMPACT FX (NEW) =====================
+function spawnBlood(x,y,amount=10){
+  for(let i=0;i<amount;i++){
+    fx.push({
+      kind:"blood",
+      x, y,
+      vx: rand(-2.6, 2.6),
+      vy: rand(-3.6, -0.8),
+      r: rand(1.5, 3.4),
+      life: Math.floor(rand(20, 42)),
+    });
+  }
+}
+function spawnImpact(x,y){
+  fx.push({kind:"hit", x, y, life: 16});
+  for(let i=0;i<6;i++){
+    fx.push({
+      kind:"spark",
+      x, y,
+      vx: rand(-3.5, 3.5),
+      vy: rand(-3.2, 1.0),
+      life: Math.floor(rand(10, 18)),
+    });
+  }
+}
+
+// ===================== ENEMY ATTACKS =====================
 function enemyAttack(e){
   const t = performance.now();
 
-  // sonido gruñido con cooldown
   if(t > e.nextSound){
     if(e.boss) SFX.boss();
     else SFX.zombie();
     e.nextSound = t + rand(900, 1700);
   }
 
-  // target vector
   const dx = (player.x + player.w*0.5) - (e.x + e.w*0.5);
   const dy = (player.y + player.h*0.5) - (e.y + e.h*0.5);
   const dist = Math.hypot(dx,dy);
 
-  // BASIC: melee (si está cerca)
   if(e.type === "basic"){
     if(dist < 62){
       damagePlayer(e.dmg);
-      fx.push({kind:"hit", x: player.x+player.w/2, y: player.y+player.h*0.45, life: 18});
+      spawnImpact(player.x+player.w/2, player.y+player.h*0.5);
+      spawnBlood(player.x+player.w/2, player.y+player.h*0.55, 6);
       e.nextAtk = t + 850;
-    } else {
-      e.nextAtk = t + 400;
-    }
+    } else e.nextAtk = t + 400;
     return;
   }
 
-  // SPITTER (verde): escupe proyectil
   if(e.type === "spitter"){
     if(dist < 780){
       const v = norm(dx, dy);
@@ -533,16 +617,12 @@ function enemyAttack(e){
       });
       SFX.spit();
       e.nextAtk = t + 1100;
-    } else {
-      e.nextAtk = t + 500;
-    }
+    } else e.nextAtk = t + 500;
     return;
   }
 
-  // TONGUE (blanco): lengua / latigazo (rango medio)
   if(e.type === "tongue"){
     if(dist < 320){
-      // ataque instantáneo lineal
       const v = norm(dx, dy);
       enemyBullets.push({
         kind:"tongue",
@@ -556,13 +636,10 @@ function enemyAttack(e){
       });
       SFX.web();
       e.nextAtk = t + 1050;
-    } else {
-      e.nextAtk = t + 520;
-    }
+    } else e.nextAtk = t + 520;
     return;
   }
 
-  // DOG: carga / salto
   if(e.type === "dog"){
     if(dist < 520){
       const dir = dx>=0 ? 1 : -1;
@@ -570,13 +647,10 @@ function enemyAttack(e){
       e.vy = -2.2;
       SFX.bark();
       e.nextAtk = t + 900;
-    } else {
-      e.nextAtk = t + 500;
-    }
+    } else e.nextAtk = t + 500;
     return;
   }
 
-  // SPIDER: salto + daño al caer cerca
   if(e.type === "spider"){
     if(dist < 560){
       const v = norm(dx, dy);
@@ -588,7 +662,6 @@ function enemyAttack(e){
     return;
   }
 
-  // FLYER: dispara “spit” desde el aire
   if(e.type === "flyer"){
     if(dist < 860){
       const v = norm(dx, dy);
@@ -608,10 +681,8 @@ function enemyAttack(e){
     return;
   }
 
-  // BOSS: cañón + summon
   if(e.type === "boss"){
     if(dist < 1200){
-      // cañón
       const v = norm(dx, dy);
       enemyBullets.push({
         kind:"cannon",
@@ -626,7 +697,6 @@ function enemyAttack(e){
       SFX.boss();
     }
 
-    // cada cierto tiempo invoca 2 enemigos
     if(Math.random() < 0.30 && enemies.length < 18){
       spawnEnemy("basic");
       spawnEnemy("spitter");
@@ -641,6 +711,7 @@ function damagePlayer(dmg){
   player.hp -= dmg;
   player.inv = 18;
   SFX.hit();
+
   if(player.hp <= 0){
     player.hp = 0;
     gameOver = true;
@@ -651,22 +722,23 @@ function damagePlayer(dmg){
   }
 }
 
-function damageEnemy(e, dmg){
+function damageEnemy(e, dmg, hitX, hitY){
   e.hp -= dmg;
-  fx.push({kind:"hit", x: e.x+e.w/2, y: e.y+e.h*0.45, life: 16});
   SFX.hit();
+
+  // NEW impact + blood
+  spawnImpact(hitX, hitY);
+  spawnBlood(hitX, hitY, e.boss ? 18 : 10);
+
   if(e.hp <= 0){
     e.hp = 0;
     killsThisLevel++;
     score += e.boss ? 1400 : 140;
     spawnDrop(e.x+e.w/2, e.y+e.h*0.5);
-
-    fx.push({kind:"boom", x: e.x+e.w/2, y: e.y+e.h*0.5, life: 26});
     SFX.dead();
     e.dead = true;
 
     if(e.boss){
-      // victoria final (cuando muere el boss)
       gameOver = true;
       victory = true;
       stopMusic();
@@ -679,32 +751,61 @@ function damageEnemy(e, dmg){
 const GRAV = 0.72;
 const MAX_FALL = 16;
 
+function isGrounded(){
+  const gy = groundY() - player.h;
+  return Math.abs(player.y - gy) < 0.001 && Math.abs(player.vy) < 0.001;
+}
+
+function applyCrouch(){
+  // ✅ S = agacharse solo en el piso
+  const wantCrouch = (keys.has("s") || keys.has("arrowdown")) && isGrounded();
+  if(wantCrouch === player.isCrouch) return;
+
+  player.isCrouch = wantCrouch;
+  const oldH = player.h;
+  player.h = wantCrouch ? player.crouchH : player.baseH;
+
+  // mantener pies en piso cuando cambia altura
+  const gyNew = groundY() - player.h;
+  player.y = gyNew;
+
+  // compensar si cambiaste en el aire (por seguridad)
+  if(!isGrounded()){
+    player.y += (oldH - player.h);
+  }
+}
+
 function stepPlayer(){
   const left  = keys.has("a") || keys.has("arrowleft");
   const right = keys.has("d") || keys.has("arrowright");
-  const up    = keys.has("w") || keys.has("arrowup");
-  const down  = keys.has("s") || keys.has("arrowdown");
 
-  // movimiento horizontal (estilo run&gun)
+  // crouch primero
+  applyCrouch();
+
+  // movimiento horizontal (crouch más lento)
   let ax = 0;
   if(left) ax -= 1;
   if(right) ax += 1;
 
-  player.vx += ax * 0.75;
+  const spMul = player.isCrouch ? 0.55 : 1.0;
+
+  player.vx += ax * 0.75 * spMul;
   player.vx *= 0.82;
-  player.vx = clamp(player.vx, -player.speed, player.speed);
+  player.vx = clamp(player.vx, -player.speed*spMul, player.speed*spMul);
 
-  // “micro ajuste” vertical (para apuntar/evitar)
-  let ay = 0;
-  if(up) ay -= 1;
-  if(down) ay += 1;
-  player.vy += ay * 0.12;
+  // ✅ salto
+  if(jumpQueued){
+    jumpQueued = false;
+    if(isGrounded() && !player.isCrouch){
+      player.vy = -13.2;
+      SFX.step();
+    }
+  }
 
-  // gravedad (para que se pegue al piso)
+  // gravedad
   player.vy += GRAV;
-  player.vy = clamp(player.vy, -12, MAX_FALL);
+  player.vy = clamp(player.vy, -14, MAX_FALL);
 
-  // integracion
   player.x += player.vx;
   player.y += player.vy;
 
@@ -718,6 +819,14 @@ function stepPlayer(){
     player.vy = 0;
   }
 
+  // anim timer
+  const moving = Math.abs(player.vx) > 0.35;
+  if(moving && isGrounded() && !player.isCrouch){
+    player.animT += 1;
+  } else {
+    player.animT = 0;
+  }
+
   if(player.inv>0) player.inv--;
 }
 
@@ -726,26 +835,20 @@ function stepEnemies(){
   for(const e of enemies){
     if(e.dead) continue;
 
-    // “fake” bob para dar vida (sin sprite sheet real)
     e.bob += 0.10;
 
-    // movimiento hacia player (suave)
     const px = player.x + player.w*0.5;
     const ex = e.x + e.w*0.5;
     const dir = (px >= ex) ? 1 : -1;
 
-    // flyers no caen
     if(e.flyer){
       e.x += dir * e.sp * 0.65;
-      // leve oscilación vertical
       e.y += Math.sin(e.bob) * 0.45;
       e.y = clamp(e.y, 70, groundY() - e.h - 180);
     } else {
-      // terrestres pegados al piso
       e.vy += GRAV;
       e.vy = clamp(e.vy, -12, MAX_FALL);
 
-      // dog y spider se mueven distinto
       if(e.type==="dog"){
         e.vx += dir * 0.14;
         e.vx = clamp(e.vx, -e.sp*1.2, e.sp*1.2);
@@ -770,12 +873,12 @@ function stepEnemies(){
       }
     }
 
-    // contacto (solo terrestres y dog/spider)
+    // contacto
     if(!e.flyer && aabb(player, e)){
       damagePlayer(e.dmg);
+      spawnBlood(player.x+player.w/2, player.y+player.h*0.6, 5);
     }
 
-    // atacar por patrón
     if(t > e.nextAtk){
       enemyAttack(e);
     }
@@ -791,11 +894,10 @@ function stepBullets(){
     b.y += b.vy;
     b.life--;
 
-    // hit enemies
     for(const e of enemies){
       if(e.dead) continue;
       if(b.x > e.x && b.x < e.x+e.w && b.y > e.y && b.y < e.y+e.h){
-        damageEnemy(e, b.dmg);
+        damageEnemy(e, b.dmg, b.x, b.y);
         b.life = 0;
         break;
       }
@@ -809,13 +911,12 @@ function stepBullets(){
     b.y += b.vy;
     b.life--;
 
-    // gravedad leve para spit
     if(b.kind==="spit") b.vy += 0.02;
 
-    // hit player
     if(b.x > player.x && b.x < player.x+player.w && b.y > player.y && b.y < player.y+player.h){
       damagePlayer(b.dmg);
-      fx.push({kind:"hit", x: b.x, y: b.y, life: 16});
+      spawnImpact(b.x, b.y);
+      spawnBlood(b.x, b.y, 6);
       b.life = 0;
     }
   }
@@ -824,7 +925,6 @@ function stepBullets(){
 
 function stepDrops(){
   for(const d of drops){
-    // caer al piso
     d.y += 1.8;
     d.y = Math.min(d.y, groundY() - d.h);
 
@@ -834,7 +934,6 @@ function stepDrops(){
         score += 25;
         SFX.reload();
       } else if(d.kind==="med"){
-        // cura inmediata pequeña
         player.hp = clamp(player.hp + 18, 0, player.maxHp);
         score += 20;
         SFX.heal();
@@ -850,7 +949,23 @@ function stepDrops(){
 }
 
 function stepFX(){
-  for(const p of fx) p.life--;
+  for(const p of fx){
+    p.life--;
+
+    // NEW particles move
+    if(p.kind==="blood" || p.kind==="spark"){
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += (p.kind==="blood" ? 0.22 : 0.18);
+      // rebotito suelo
+      const gy = groundY()-2;
+      if(p.y > gy){
+        p.y = gy;
+        p.vx *= 0.65;
+        p.vy *= -0.20;
+      }
+    }
+  }
   fx = fx.filter(p=>p.life>0);
 }
 
@@ -873,7 +988,6 @@ function setupExit(){
 }
 
 function updateExit(){
-  // activa salida al cumplir kills (o boss muerto)
   if(level < 10){
     exitDoor.active = (killsThisLevel >= killGoal);
   } else {
@@ -892,7 +1006,6 @@ function updateExit(){
       level++;
       setupLevel(level);
     } else {
-      // solo por seguridad (normalmente lo gana al matar boss)
       gameOver = true;
       victory = true;
       stopMusic();
@@ -917,7 +1030,6 @@ function updateTopUI(){
 
 // ===================== RENDER =====================
 function drawBackground(){
-  // Fondo pixel art
   const img = GFX.bg;
   const w = W(), h = H();
 
@@ -925,14 +1037,11 @@ function drawBackground(){
   ctx.fillRect(0,0,w,h);
 
   if(img){
-    // parallax horizontal
     const sx = Math.floor(cameraX * 0.55) % img.width;
-    // cubrir todo el canvas repitiendo
     for(let x=-sx; x<w; x+=img.width){
       ctx.drawImage(img, x, 0, img.width, h);
     }
   } else {
-    // fallback gradiente
     const g = ctx.createLinearGradient(0,0,0,h);
     g.addColorStop(0,"#0b1220");
     g.addColorStop(1,"#050713");
@@ -940,27 +1049,51 @@ function drawBackground(){
     ctx.fillRect(0,0,w,h);
   }
 
-  // “piso” sombra
   ctx.fillStyle="rgba(0,0,0,0.25)";
   ctx.fillRect(0, groundY(), w, FLOOR_H);
 }
 
 function drawPlayer(){
-  const img = GFX.player;
   const x = Math.round(player.x - cameraX);
   const y = Math.round(player.y);
 
+  // elegir sprite según estado
+  let img = GFX.idle;
+
+  const moving = Math.abs(player.vx) > 0.35;
+  const grounded = isGrounded();
+
+  if(player.isCrouch){
+    img = GFX.idle || null;
+  } else if(!grounded){
+    img = GFX.idle || null;
+  } else if(moving){
+    const frames = [GFX.run1, GFX.run2, GFX.run3].filter(Boolean);
+    if(frames.length){
+      const idx = Math.floor(player.animT / 6) % frames.length; // velocidad anim
+      img = frames[idx];
+    }
+  }
+
+  // dibujar con flip izquierda/derecha
   if(img){
-    ctx.drawImage(img, x, y, player.w, player.h);
+    ctx.save();
+    if(player.facing === -1){
+      ctx.translate(x + player.w, y);
+      ctx.scale(-1, 1);
+      ctx.drawImage(img, 0, 0, player.w, player.h);
+    } else {
+      ctx.drawImage(img, x, y, player.w, player.h);
+    }
+    ctx.restore();
   } else {
     ctx.fillStyle="#fff";
     ctx.fillRect(x,y,player.w,player.h);
   }
 
-  // barra vida player (arriba del sprite)
+  // barra vida arriba del player
   drawHealthBar(x, y-10, player.w, 6, player.hp, player.maxHp, true);
 
-  // mira/cursor (crosshair)
   drawCrosshair();
 }
 
@@ -977,10 +1110,8 @@ function drawEnemies(){
       ctx.fillRect(x,y,e.w,e.h);
     }
 
-    // barra vida enemies
     drawHealthBar(x, y-10, e.w, 6, e.hp, e.maxHp, false);
 
-    // nombre tipo (solo boss)
     if(e.boss){
       ctx.fillStyle="rgba(255,255,255,0.92)";
       ctx.font="bold 14px Arial";
@@ -990,7 +1121,6 @@ function drawEnemies(){
 }
 
 function drawBullets(){
-  // balas del jugador (pequeñas)
   ctx.fillStyle = "rgba(250,204,21,0.95)";
   for(const b of bullets){
     const x = b.x - cameraX;
@@ -999,7 +1129,6 @@ function drawBullets(){
     ctx.fill();
   }
 
-  // bullets enemigos
   for(const b of enemyBullets){
     const x = b.x - cameraX;
     if(b.kind==="cannon"){
@@ -1035,21 +1164,16 @@ function drawFX(){
     if(p.kind==="muzzle"){
       const img = GFX.muzzle;
       if(img){
-        // 3 frames horizontales
         const frames = 3;
         const fw = Math.floor(img.width / frames);
         const fh = img.height;
-
         const idx = clamp(Math.floor((10 - p.life) / 3), 0, 2);
 
         const size = 52;
         ctx.save();
         ctx.translate(x, y);
-
-        // rotación según aim
         const ang = Math.atan2(player.aim.ay, player.aim.ax);
         ctx.rotate(ang);
-
         ctx.drawImage(img, idx * fw, 0, fw, fh, -size/2, -size/2, size, size);
         ctx.restore();
       } else {
@@ -1065,10 +1189,18 @@ function drawFX(){
       continue;
     }
 
-    if(p.kind==="boom"){
-      const a = clamp(p.life/26,0,1);
-      ctx.fillStyle = `rgba(250,204,21,${a})`;
-      ctx.beginPath(); ctx.arc(x,y,22*(1.2-a),0,Math.PI*2); ctx.fill();
+    if(p.kind==="spark"){
+      ctx.fillStyle = `rgba(250,204,21,${clamp(p.life/18,0,1)})`;
+      ctx.fillRect(x, y, 2, 2);
+      continue;
+    }
+
+    if(p.kind==="blood"){
+      const a = clamp(p.life/42,0,1);
+      ctx.fillStyle = `rgba(220,38,38,${a})`;
+      ctx.beginPath();
+      ctx.arc(x, y, p.r, 0, Math.PI*2);
+      ctx.fill();
       continue;
     }
 
@@ -1099,7 +1231,7 @@ function drawDoor(){
   if(!exitDoor.active){
     ctx.fillText("CERRADO", x+16, y+24);
     ctx.font="12px Arial";
-    ctx.fillText(`Kills: ${killsThisLevel}/${killGoal}`, x+12, y+44);
+    ctx.fillText(`Objetivo: ${killsThisLevel}/${killGoal}`, x+12, y+44);
   } else {
     ctx.fillText("SALIDA", x+26, y+24);
     ctx.font="12px Arial";
@@ -1112,30 +1244,63 @@ function drawDoor(){
   }
 }
 
+// ✅ HUD estilo Metal Slug + contador objetivo
 function drawHUD(){
-  // HUD arriba izquierda dentro del canvas (no tapa instrucciones externas)
+  const w=W();
+
+  // panel superior izq
   ctx.save();
-  ctx.fillStyle="rgba(0,0,0,0.35)";
-  ctx.fillRect(12, 12, 420, 86);
-  ctx.strokeStyle="rgba(255,255,255,0.12)";
-  ctx.strokeRect(12, 12, 420, 86);
+  ctx.fillStyle="rgba(0,0,0,0.40)";
+  ctx.fillRect(12, 12, 460, 96);
+  ctx.strokeStyle="rgba(255,255,255,0.10)";
+  ctx.strokeRect(12, 12, 460, 96);
 
   ctx.fillStyle="rgba(255,255,255,0.92)";
-  ctx.font="14px Arial";
-
+  ctx.font="bold 14px Arial";
   ctx.fillText(`Nivel: ${level}/10`, 24, 34);
-  ctx.fillText(`Kills (nivel): ${killsThisLevel}/${killGoal===999?"BOSS":killGoal}`, 24, 54);
-  ctx.fillText(`Munición: ${ammo.mag}/${ammo.maxMag} | Reserva: ${ammo.reserve}`, 24, 74);
-  ctx.fillText(`Medkits: ${medkits}`, 290, 74);
 
-  // barra HP arriba
-  drawHealthBar(24, 82, 380, 8, player.hp, player.maxHp, true);
+  ctx.font="13px Arial";
+  ctx.fillText(`Objetivo (kills): ${killsThisLevel}/${killGoal===999?"BOSS":killGoal}`, 24, 54);
+  ctx.fillText(`Munición: ${ammo.mag}/${ammo.maxMag}  |  Reserva: ${ammo.reserve}`, 24, 74);
+  ctx.fillText(`Medkits: ${medkits}`, 330, 74);
+
+  // barra HP pro
+  drawHealthBar(24, 84, 430, 10, player.hp, player.maxHp, true);
+  ctx.restore();
+
+  // minimapa
+  drawMiniMap(w - 220, 12, 200, 64);
+}
+
+function drawMiniMap(x,y,w,h){
+  ctx.save();
+  ctx.fillStyle="rgba(0,0,0,0.45)";
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle="rgba(255,255,255,0.12)";
+  ctx.strokeRect(x, y, w, h);
+
+  const scale = w / WORLD_W;
+
+  // door
+  ctx.fillStyle = exitDoor.active ? "rgba(34,197,94,0.95)" : "rgba(255,255,255,0.35)";
+  ctx.fillRect(x + exitDoor.x * scale, y + h - 10, 4, 8);
+
+  // enemies
+  ctx.fillStyle="rgba(239,68,68,0.95)";
+  for(const e of enemies){
+    const ex = x + e.x * scale;
+    const ey = y + h - (e.flyer ? 24 : 10);
+    ctx.fillRect(ex, ey, 3, 3);
+  }
+
+  // player
+  ctx.fillStyle="rgba(250,204,21,0.95)";
+  ctx.fillRect(x + player.x * scale, y + h - 12, 4, 6);
 
   ctx.restore();
 }
 
 function drawCrosshair(){
-  // cursor personalizado simple
   const x = mouse.x;
   const y = mouse.y;
   ctx.save();
@@ -1189,7 +1354,7 @@ function drawEnd(){
   ctx.fillText(`Nivel alcanzado: ${level}/10`, x+34, y+120);
   ctx.fillText(`Score: ${score}`, x+34, y+152);
   ctx.fillText(`High Score: ${high}`, x+34, y+184);
-  ctx.fillText(`Kills nivel: ${killsThisLevel}/${killGoal===999?"BOSS":killGoal}`, x+34, y+216);
+  ctx.fillText(`Objetivo: ${killsThisLevel}/${killGoal===999?"BOSS":killGoal}`, x+34, y+216);
 
   ctx.textAlign="center";
   ctx.font="14px Arial";
@@ -1208,6 +1373,10 @@ function step(){
   stepBullets();
   stepDrops();
   stepFX();
+
+  // ✅ NEW: mantiene enemigos hasta cumplir objetivo
+  spawnDirector();
+
   updateCamera();
   updateExit();
   updateTopUI();
@@ -1237,7 +1406,6 @@ function loop(){
 function setupLevel(lvl){
   level = lvl;
 
-  // ajustes por nivel
   const baseMag = 18;
   ammo.maxMag = baseMag + Math.floor((lvl-1)/2)*2;
   ammo.mag = ammo.maxMag;
@@ -1246,19 +1414,20 @@ function setupLevel(lvl){
   player.hp = clamp(player.hp + 18, 0, player.maxHp);
   player.inv = 10;
 
-  // reset player a inicio
   player.x = 120;
+  player.h = player.baseH;
+  player.isCrouch = false;
   player.y = groundY() - player.h;
   player.vx = 0;
   player.vy = 0;
 
-  // wave
+  bullets.length = 0;
+  enemyBullets.length = 0;
+  drops.length = 0;
+  fx.length = 0;
+
   spawnWave(lvl);
-
-  // exit
   setupExit();
-
-  // score ui
   updateTopUI();
 }
 
@@ -1268,7 +1437,12 @@ async function startGame(){
   if(!muted) startMusic();
 
   paused = false;
-  if(overlay) overlay.classList.add("hidden");
+
+  if(overlay){
+    overlay.classList.add("hidden");
+    overlay.style.pointerEvents = "none";
+  }
+
   canvas.focus();
 }
 
@@ -1286,6 +1460,8 @@ function resetGame(){
   player.hp = player.maxHp;
   player.inv = 0;
   player.x = 120;
+  player.h = player.baseH;
+  player.isCrouch = false;
   player.y = groundY() - player.h;
 
   cameraX = 0; cameraVx = 0;
@@ -1293,7 +1469,10 @@ function resetGame(){
   setupLevel(1);
   updateTopUI();
 
-  if(overlay) overlay.classList.remove("hidden");
+  if(overlay){
+    overlay.classList.remove("hidden");
+    overlay.style.pointerEvents = "auto";
+  }
 }
 
 function togglePause(){
@@ -1331,12 +1510,10 @@ if(volEl){
 // ===================== BOOT =====================
 (async function boot(){
   setText(uiHigh, high);
+  if(btnMute) btnMute.textContent = muted ? "Activar sonido" : "Mute";
 
-  // carga imágenes
   await loadAll();
-  assetsReady = true;
 
-  // init level
   resetGame();
   loop();
 })();
