@@ -48,5 +48,4 @@ Desarrollado íntegramente en **JavaScript puro (Vanilla JS)** utilizando la API
 ## 🚀 Instalación y Uso
 
 1. Clona este repositorio:
-   ```bash
-   git clone [https://github.com/TuUsuario/resident-slug.git](https://github.com/TuUsuario/resident-slug.git)
+   https://github.com/RANM-rgb/Examen-AV.git
