@@ -1,10 +1,19 @@
 /* =========================================================
    RESIDENT SLUG - Survival Horror (Canvas 2D)
-   FIX:
-   - Desaparecer al moverse/cambiar nivel: viewW/viewH estables
-   - Audio más fuerte (compresor + sfx mejorados)
-   - Música de fondo mejor (pad + beat simple)
-   - Pantalla completa (botón btnFS + tecla F)
+   MAIN.JS (FULL) ✅ FIXED
+
+   FIX + MODS INCLUIDAS:
+   - ✅ Ya NO te “desapareces” al avanzar/cambiar nivel (viewW/viewH estables)
+   - ✅ Mundo por NIVEL (ya no tardas una vida en llegar a la puerta)
+   - ✅ Fondo con parallax SIN glitches/costuras
+   - ✅ Movimiento más “Metal Slug” (speed + fricción mejor)
+   - ✅ W = brincar (solo en piso) | S = agacharse (solo en piso)
+   - ✅ Se nota izquierda/derecha (runL / runR + flip seguro)
+   - ✅ Spawn director (no te quedas sin enemigos y no se traba en nivel 3)
+   - ✅ Enemigos no spawnean encima de ti
+   - ✅ FX (sangre/impactos) con límite para rendimiento
+   - ✅ SFX más fuertes + música mejor (WebAudio)
+   - ✅ Fullscreen: tecla F + botón btnFS (si existe en tu HTML)
 ========================================================= */
 
 // ===================== CANVAS =====================
@@ -13,15 +22,13 @@ const ctx = canvas.getContext("2d", { alpha: false });
 canvas.style.outline = "none";
 canvas.setAttribute("tabindex", "0");
 
-// ✅ Tamaño visible estable (evita W/H = 0)
+// ✅ Tamaño visible estable (evita W/H=0 y bugs al cambiar nivel)
 let viewW = 800;
 let viewH = 600;
 
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
   const r = canvas.getBoundingClientRect();
-
-  // guardamos tamaño visible REAL (CSS px)
   viewW = Math.max(1, Math.floor(r.width));
   viewH = Math.max(1, Math.floor(r.height));
 
@@ -29,10 +36,11 @@ function resizeCanvas() {
   canvas.height = Math.floor(viewH * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
+
 window.addEventListener("resize", resizeCanvas);
+document.addEventListener("fullscreenchange", () => setTimeout(resizeCanvas, 60));
 resizeCanvas();
 
-// Helpers usando viewW/viewH (NO clientWidth)
 function W() { return viewW; }
 function H() { return viewH; }
 
@@ -46,7 +54,7 @@ const btnStart = document.getElementById("btnStart");
 const btnReset = document.getElementById("btnReset");
 const btnPause = document.getElementById("btnPause");
 const btnMute  = document.getElementById("btnMute");
-const btnFS    = document.getElementById("btnFS");
+const btnFS    = document.getElementById("btnFS"); // si no existe, no pasa nada
 const volEl    = document.getElementById("vol");
 
 function setText(el, v){ if(el) el.textContent = v; }
@@ -65,8 +73,16 @@ function norm(x,y){
 
 // ===================== WORLD =====================
 const MAX_LEVELS = 10;
-const WORLD_W = 5200;
+
+// ✅ Mundo por nivel (ya no caminarás 5200px siempre)
+let WORLD_W = 2800;
 const FLOOR_H = 120;
+
+function worldWidthForLevel(lvl){
+  // lvl1=2800, lvl10=4780 (se siente más “arcade”)
+  return 2800 + (lvl-1) * 220;
+}
+
 function groundY(){ return H() - FLOOR_H; }
 
 let cameraX = 0;
@@ -78,8 +94,8 @@ const ASSETS = {
 
   // player
   idle:     { src:"img/player.png" },
-  runR:     { src:"img/run1.png" },
-  runL:     { src:"img/run_left.png" },
+  runR:     { src:"img/run1.png" },         // derecha
+  runL:     { src:"img/run_left.png" },     // izquierda (si existe)
   crouch:   { src:"img/agachada.png" },
   jump:     { src:"img/jumping.png" },
   hurt:     { src:"img/damage.png" },
@@ -88,29 +104,36 @@ const ASSETS = {
   shoot:    { src:"img/shoot.png" },
 
   // muzzle
-  muzzle:  { src:"img/Balas.png" }, // 3 frames
+  muzzle:   { src:"img/Balas.png" }, // 3 frames horiz
 
   // enemies
-  z_basic: { src:"img/zombie.png" },
-  z_green: { src:"img/zombie verde.png" },
-  z_white: { src:"img/zombie blanco.png" },
-  dog:     { src:"img/perro.png" },
-  spider:  { src:"img/zombie araña.png" },
+  z_basic:  { src:"img/zombie.png" },
+  z_green:  { src:"img/zombie verde.png" },
+  z_white:  { src:"img/zombie blanco.png" },
+  dog:      { src:"img/perro.png" },
+  spider:   { src:"img/zombie araña.png" },
 
-  // boss anims
-  boss_idle:   { src:"img/jefe_final.png" },
-  boss_attack: { src:"img/heavy_attack.png" },
-  boss_hurt:   { src:"img/critical_damage.png" },
+  // boss anims (tus frames)
+  boss_idle:    { src:"img/jefe_final.png" },
+  boss_attack:  { src:"img/heavy_attack.png" },
+  boss_hurt:    { src:"img/critical_damage.png" },
+  // si tienes turbo mode, lo puedes añadir y usar
+  // boss_turbo: { src:"img/turbo mode.png" },
 };
 
 const GFX = {};
 function loadImage(key, src){
   return new Promise((res, rej)=>{
     const img = new Image();
-    img.onload = ()=>res(img);
-    img.onerror = ()=>rej(new Error("No se pudo cargar: " + src));
+    img.onload = ()=>{
+      GFX[key] = img;
+      res(img);
+    };
+    img.onerror = ()=>{
+      delete GFX[key];
+      rej(new Error("No se pudo cargar: " + src));
+    };
     img.src = src;
-    GFX[key] = img;
   });
 }
 async function loadAll(){
@@ -132,7 +155,6 @@ function initAudio(){
   master = audioCtx.createGain();
   master.gain.value = 0.95;
 
-  // ✅ compresor para que suene fuerte sin reventar
   comp = audioCtx.createDynamicsCompressor();
   comp.threshold.value = -18;
   comp.knee.value = 18;
@@ -148,7 +170,7 @@ function initAudio(){
   sfxGain.connect(master);
 
   musicGain = audioCtx.createGain();
-  musicGain.gain.value = 0.26; // música más presente
+  musicGain.gain.value = 0.26;
   musicGain.connect(master);
 }
 
@@ -166,21 +188,37 @@ function envGain(g, t0, a=0.005, d=0.08, peak=1.0){
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + a + d);
 }
 
+// ✅ cache ruido (evita lag por crear buffers cada disparo)
+const NOISE_CACHE = new Map();
 function noiseBuffer(seconds){
+  const key = String(seconds);
+  if(NOISE_CACHE.has(key)) return NOISE_CACHE.get(key);
+
   const n = Math.floor(audioCtx.sampleRate * seconds);
   const b = audioCtx.createBuffer(1, n, audioCtx.sampleRate);
   const data = b.getChannelData(0);
   for(let i=0;i<n;i++) data[i] = (Math.random()*2-1);
+  NOISE_CACHE.set(key, b);
   return b;
 }
 
-// ✅ SFX más “Metal Slug”
+function simpleBeep(freq, dur, gain, type="sine"){
+  const t0 = audioCtx.currentTime;
+  const o = audioCtx.createOscillator();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, t0);
+  const g = audioCtx.createGain();
+  envGain(g, t0, 0.003, dur, gain);
+  o.connect(g); g.connect(sfxGain);
+  o.start(t0);
+  o.stop(t0 + dur + 0.02);
+}
+
 const SFX = {
   shoot(){
     if(!audioCtx || muted) return;
     const t0 = audioCtx.currentTime;
 
-    // ruido + filtro (muzzle)
     const src = audioCtx.createBufferSource();
     src.buffer = noiseBuffer(0.08);
 
@@ -199,13 +237,12 @@ const SFX = {
     src.start(t0);
     src.stop(t0 + 0.09);
 
-    // click metálico
     const o = audioCtx.createOscillator();
     o.type = "square";
     o.frequency.setValueAtTime(1200, t0);
     o.frequency.exponentialRampToValueAtTime(420, t0 + 0.05);
     const g2 = audioCtx.createGain();
-    envGain(g2, t0, 0.002, 0.05, 0.20);
+    envGain(g2, t0, 0.002, 0.05, 0.22);
     o.connect(g2); g2.connect(sfxGain);
     o.start(t0);
     o.stop(t0 + 0.06);
@@ -217,12 +254,13 @@ const SFX = {
 
     const src = audioCtx.createBufferSource();
     src.buffer = noiseBuffer(0.10);
+
     const bp = audioCtx.createBiquadFilter();
     bp.type = "bandpass";
     bp.frequency.setValueAtTime(240, t0);
 
     const g = audioCtx.createGain();
-    envGain(g, t0, 0.004, 0.10, 0.65);
+    envGain(g, t0, 0.004, 0.10, 0.70);
 
     src.connect(bp); bp.connect(g); g.connect(sfxGain);
     src.start(t0);
@@ -233,25 +271,26 @@ const SFX = {
     if(!audioCtx || muted) return;
     const t0 = audioCtx.currentTime;
 
-    // thump + noise
     const o = audioCtx.createOscillator();
     o.type = "sawtooth";
     o.frequency.setValueAtTime(120, t0);
     o.frequency.exponentialRampToValueAtTime(55, t0 + 0.18);
 
     const g = audioCtx.createGain();
-    envGain(g, t0, 0.004, 0.22, 0.35);
+    envGain(g, t0, 0.004, 0.22, 0.40);
     o.connect(g); g.connect(sfxGain);
     o.start(t0);
     o.stop(t0 + 0.20);
 
     const src = audioCtx.createBufferSource();
     src.buffer = noiseBuffer(0.18);
+
     const lp = audioCtx.createBiquadFilter();
     lp.type="lowpass";
     lp.frequency.setValueAtTime(650, t0);
+
     const g2 = audioCtx.createGain();
-    envGain(g2, t0, 0.003, 0.18, 0.45);
+    envGain(g2, t0, 0.003, 0.18, 0.55);
     src.connect(lp); lp.connect(g2); g2.connect(sfxGain);
     src.start(t0);
     src.stop(t0 + 0.20);
@@ -265,7 +304,7 @@ const SFX = {
     o.frequency.setValueAtTime(110, t0);
     o.frequency.exponentialRampToValueAtTime(80, t0+0.18);
     const g = audioCtx.createGain();
-    envGain(g, t0, 0.01, 0.20, 0.18);
+    envGain(g, t0, 0.01, 0.20, 0.20);
     o.connect(g); g.connect(sfxGain);
     o.start(t0);
     o.stop(t0+0.22);
@@ -279,40 +318,27 @@ const SFX = {
     o.frequency.setValueAtTime(70, t0);
     o.frequency.exponentialRampToValueAtTime(45, t0+0.25);
     const g = audioCtx.createGain();
-    envGain(g, t0, 0.01, 0.28, 0.24);
+    envGain(g, t0, 0.01, 0.28, 0.28);
     o.connect(g); g.connect(sfxGain);
     o.start(t0);
     o.stop(t0+0.30);
   },
 
-  spit(){ if(!audioCtx||muted) return; simpleBeep(380, 0.12, 0.22, "square"); },
-  web(){  if(!audioCtx||muted) return; simpleBeep(420, 0.14, 0.20, "triangle"); },
-  bark(){ if(!audioCtx||muted) return; simpleBeep(220, 0.10, 0.24, "sawtooth"); },
-  reload(){ if(!audioCtx||muted) return; simpleBeep(260, 0.12, 0.22, "sine"); },
-  heal(){ if(!audioCtx||muted) return; simpleBeep(640, 0.16, 0.18, "triangle"); },
-  door(){ if(!audioCtx||muted) return; simpleBeep(720, 0.10, 0.20, "sine"); },
+  spit(){   if(!audioCtx||muted) return; simpleBeep(380, 0.12, 0.24, "square"); },
+  web(){    if(!audioCtx||muted) return; simpleBeep(420, 0.14, 0.22, "triangle"); },
+  bark(){   if(!audioCtx||muted) return; simpleBeep(220, 0.10, 0.26, "sawtooth"); },
+  reload(){ if(!audioCtx||muted) return; simpleBeep(260, 0.12, 0.24, "sine"); },
+  heal(){   if(!audioCtx||muted) return; simpleBeep(640, 0.16, 0.20, "triangle"); },
+  door(){   if(!audioCtx||muted) return; simpleBeep(720, 0.10, 0.24, "sine"); },
 };
 
-function simpleBeep(freq, dur, gain, type="sine"){
-  const t0 = audioCtx.currentTime;
-  const o = audioCtx.createOscillator();
-  o.type = type;
-  o.frequency.setValueAtTime(freq, t0);
-  const g = audioCtx.createGain();
-  envGain(g, t0, 0.003, dur, gain);
-  o.connect(g); g.connect(sfxGain);
-  o.start(t0);
-  o.stop(t0 + dur + 0.02);
-}
-
-// ✅ Música más “horror” con beat suave
+// ✅ música “horror” + beat suave
 function startMusic(){
   if(!audioCtx || muted || musicOn) return;
   musicOn = true;
 
   const t0 = audioCtx.currentTime;
 
-  // pad
   const pad1 = audioCtx.createOscillator();
   const pad2 = audioCtx.createOscillator();
   pad1.type="triangle";
@@ -330,7 +356,6 @@ function startMusic(){
   padG.connect(lp);
   lp.connect(musicGain);
 
-  // intervalos tensos
   const seq=[196,174.61,164.81,146.83,164.81,174.61,196,220];
   let i=0;
   let alive=true;
@@ -340,12 +365,11 @@ function startMusic(){
     const tt = audioCtx.currentTime;
     const n = seq[i%seq.length];
     pad1.frequency.setValueAtTime(n, tt);
-    pad2.frequency.setValueAtTime(n*0.503, tt); // desafinado para terror
+    pad2.frequency.setValueAtTime(n*0.503, tt);
     i++;
     setTimeout(tick, 320);
   }
 
-  // beat (kick suave)
   const beat = setInterval(()=>{
     if(!musicOn) return;
     const tt = audioCtx.currentTime;
@@ -370,34 +394,24 @@ function startMusic(){
 
   musicNodes = [pad1, pad2, lp, padG, { stop(){ alive=false; clearInterval(beat); } }];
 }
-
 function stopMusic(){
   musicOn=false;
-  try{
-    for(const n of musicNodes){
-      if(!n) continue;
-      if(typeof n.stop === "function") n.stop();
-    }
-  }catch{}
+  try{ for(const n of musicNodes) if(n && typeof n.stop==="function") n.stop(); }catch{}
   musicNodes=[];
 }
 
 // ===================== FULLSCREEN =====================
 function toggleFullscreen(){
-  const el = canvas; // o document.querySelector(".canvas-wrap")
+  const el = canvas;
   const fsEl = document.fullscreenElement;
-
   if(!fsEl){
     if(el.requestFullscreen) el.requestFullscreen();
   }else{
     if(document.exitFullscreen) document.exitFullscreen();
   }
 }
-
 document.addEventListener("keydown",(e)=>{
-  if((e.key||"").toLowerCase()==="f"){
-    toggleFullscreen();
-  }
+  if((e.key||"").toLowerCase()==="f") toggleFullscreen();
 });
 
 // ===================== INPUT =====================
@@ -473,28 +487,36 @@ let enemies = [];
 let drops = [];
 let fx = [];
 
-let exitDoor = { x: WORLD_W - 280, y: 0, w: 110, h: 140, active: false };
+const FX_CAP = 650;
+function pushFX(p){
+  if(fx.length >= FX_CAP) fx.splice(0, 40);
+  fx.push(p);
+}
+
+let exitDoor = { x: 0, y: 0, w: 110, h: 140, active: false };
 let waveProfile = null;
 
-// tamaños
+// tamaños base (se ajustan con imágenes si existen)
 const SPR = {
-  playerH: 96,
-  playerW: 70,
-  crouchH: 64,
+  playerH: 112,
+  playerW: 84,
+  crouchH: 72,
   zH: { basic: 110, spitter: 118, tongue: 118, dog: 92, spider: 110, flyer: 98, boss: 230 }
 };
 
 const player = {
   x: 120, y: 0,
-  w: 70, h: 96,
-  baseH: 96,
-  crouchH: 64,
+  w: 84, h: 112,
+  baseH: 112,
+  crouchH: 72,
   isCrouch: false,
 
   vx: 0, vy: 0,
   hp: 100, maxHp: 100,
   inv: 0,
-  speed: 4.2,
+
+  // ✅ más Metal Slug
+  speed: 6.6,
 
   aim: {ax:1, ay:0},
   facing: 1,
@@ -509,17 +531,15 @@ let medkits = 2;
 // ===================== AUTO SIZE =====================
 function sizeFromImage(imgKey, targetH, fallbackW=80){
   const img = GFX[imgKey];
-  if(!img || !img.width || !img.height){
-    return { w: fallbackW, h: targetH };
-  }
-  const aspect = img.width / img.height;
+  if(!img || !img.naturalWidth || !img.naturalHeight) return { w: fallbackW, h: targetH };
+  const aspect = img.naturalWidth / img.naturalHeight;
   const w = Math.round(targetH * aspect);
   return { w, h: targetH };
 }
 function initSpriteMetrics(){
-  const base = sizeFromImage(GFX.runR ? "runR" : "idle", 112, 80); // ⬅️ un poco más grande
-  SPR.playerH = clamp(base.h, 96, 140);
-  SPR.playerW = clamp(base.w, 70, 130);
+  const base = sizeFromImage("runR", 124, 90);
+  SPR.playerH = clamp(base.h, 108, 150);
+  SPR.playerW = clamp(base.w, 78, 160);
   SPR.crouchH = Math.round(SPR.playerH * 0.68);
 
   player.w = SPR.playerW;
@@ -530,6 +550,7 @@ function initSpriteMetrics(){
 }
 
 // ===================== LEVELS =====================
+// ✅ distintos zombies por nivel + boss final
 const LEVELS = [
   { goal: 10, wave: { basic: 10 } },
   { goal: 12, wave: { basic: 8, spitter: 4 } },
@@ -547,13 +568,13 @@ const LEVELS = [
 function enemyTemplate(type){
   const h = SPR.zH[type] ?? 110;
   const base = {
-    basic:   { img:"z_basic",  hp:55,  sp:1.1,  dmg:10, flyer:false },
-    spitter: { img:"z_green",  hp:70,  sp:0.9,  dmg:10, flyer:false },
-    tongue:  { img:"z_white",  hp:80,  sp:0.85, dmg:12, flyer:false },
-    dog:     { img:"dog",      hp:55,  sp:2.3,  dmg:14, flyer:false },
-    spider:  { img:"spider",   hp:70,  sp:1.6,  dmg:12, flyer:false },
-    flyer:   { img:"spider",   hp:60,  sp:1.5,  dmg:10, flyer:true  },
-    boss:    { img:"boss_idle",hp:980, sp:0.9,  dmg:18, flyer:false, boss:true },
+    basic:   { img:"z_basic",   hp:55,  sp:1.1,  dmg:10, flyer:false },
+    spitter: { img:"z_green",   hp:70,  sp:0.9,  dmg:10, flyer:false },
+    tongue:  { img:"z_white",   hp:80,  sp:0.85, dmg:12, flyer:false },
+    dog:     { img:"dog",       hp:55,  sp:2.3,  dmg:14, flyer:false },
+    spider:  { img:"spider",    hp:70,  sp:1.6,  dmg:12, flyer:false },
+    flyer:   { img:"spider",    hp:60,  sp:1.5,  dmg:10, flyer:true  },
+    boss:    { img:"boss_idle", hp:980, sp:0.9,  dmg:18, flyer:false, boss:true },
   }[type];
   if(!base) return null;
 
@@ -578,7 +599,11 @@ function spawnEnemy(type){
   const T = enemyTemplate(type);
   if(!T) return;
 
-  const x = rand(Math.max(600, player.x+500), Math.min(WORLD_W - 600, player.x+1600));
+  // ✅ NO spawnear encima del player + dentro del mundo
+  const x1 = clamp(player.x + 700, 600, WORLD_W - 600);
+  const x2 = clamp(player.x + 1800, 800, WORLD_W - 600);
+  const x = rand(Math.min(x1,x2), Math.max(x1,x2));
+
   const y = T.flyer ? rand(90, groundY() - T.h - 180) : (groundY() - T.h);
 
   enemies.push({
@@ -587,8 +612,10 @@ function spawnEnemy(type){
     x, y, w:T.w, h:T.h,
     vx: (Math.random()<0.5?-1:1) * T.sp,
     vy: 0,
+
     hp: T.hp + Math.floor(level*8),
     maxHp: T.hp + Math.floor(level*8),
+
     sp: T.sp,
     dmg: T.dmg,
     flyer: !!T.flyer,
@@ -600,17 +627,24 @@ function spawnEnemy(type){
 
     nextAtk: performance.now() + rand(600, 1400),
     nextSound: performance.now() + rand(700, 1500),
+
     bob: rand(0, Math.PI*2),
   });
 }
 
+// ✅ Spawn director (no te quedas sin enemigos + evita lag)
+let nextSpawnTick = 0;
 function spawnDirector(){
+  const now = performance.now();
+  if(now < nextSpawnTick) return;
+  nextSpawnTick = now + 320; // ~3 veces por segundo
+
   if(level >= 10) return;
   if(killsThisLevel >= killGoal) return;
 
   const aliveTarget = clamp(5 + Math.floor(level/2), 5, 12);
   if(enemies.length < aliveTarget){
-    const need = aliveTarget - enemies.length;
+    const need = Math.min(3, aliveTarget - enemies.length);
     for(let i=0;i<need;i++){
       spawnEnemy(pickEnemyTypeFromProfile(waveProfile));
     }
@@ -619,6 +653,7 @@ function spawnDirector(){
 
 function spawnWave(lvl){
   enemies.length = 0;
+
   const row = LEVELS[lvl-1];
   killGoal = row.goal;
   killsThisLevel = 0;
@@ -626,7 +661,8 @@ function spawnWave(lvl){
 
   if(row.wave.boss){
     spawnEnemy("boss");
-    enemies[0].x = WORLD_W - 980;
+    // boss fijo cerca del final del mundo del nivel
+    enemies[0].x = WORLD_W - 820;
     enemies[0].y = groundY() - enemies[0].h;
     return;
   }
@@ -663,7 +699,6 @@ function shoot(){
   if(paused || gameOver) return;
   const t = performance.now();
   if(t - lastShot < 115) return;
-
   if(ammo.mag <= 0) return;
 
   lastShot = t;
@@ -676,10 +711,16 @@ function shoot(){
   const sx = player.x + player.w*0.55;
   const sy = player.y + player.h*0.40;
 
-  fx.push({ kind:"muzzle", x: sx + player.aim.ax * 18, y: sy + player.aim.ay * 18, life: 10 });
+  pushFX({ kind:"muzzle", x: sx + player.aim.ax * 18, y: sy + player.aim.ay * 18, life: 10 });
 
   const speed = 13.8;
-  bullets.push({ x:sx, y:sy, vx:player.aim.ax*speed, vy:player.aim.ay*speed, r:3, life:90, dmg:22 + Math.floor(level*1.1) });
+  bullets.push({
+    x:sx, y:sy,
+    vx:player.aim.ax*speed,
+    vy:player.aim.ay*speed,
+    r:3, life:90,
+    dmg:22 + Math.floor(level*1.1)
+  });
 }
 
 function reload(){
@@ -702,23 +743,31 @@ function heal(){
   medkits--;
   player.hp = clamp(player.hp + 28, 0, player.maxHp);
   SFX.heal();
-  fx.push({kind:"heal", x: player.x + player.w/2, y: player.y + 10, life: 26});
+  pushFX({kind:"heal", x: player.x + player.w/2, y: player.y + 10, life: 26});
 }
 
 // ===================== FX =====================
 function spawnBlood(x,y,amount=10){
+  amount = Math.min(amount, 14);
   for(let i=0;i<amount;i++){
-    fx.push({ kind:"blood", x, y, vx: rand(-2.6,2.6), vy: rand(-3.6,-0.8), r: rand(1.6,3.8), life: Math.floor(rand(22,48)) });
+    pushFX({
+      kind:"blood",
+      x, y,
+      vx: rand(-2.6,2.6),
+      vy: rand(-3.6,-0.8),
+      r:  rand(1.6,3.8),
+      life: Math.floor(rand(18,38))
+    });
   }
 }
 function spawnImpact(x,y){
-  fx.push({kind:"hit", x, y, life: 16});
-  for(let i=0;i<6;i++){
-    fx.push({ kind:"spark", x, y, vx: rand(-3.5,3.5), vy: rand(-3.2,1.0), life: Math.floor(rand(10,18)) });
+  pushFX({kind:"hit", x, y, life: 14});
+  for(let i=0;i<4;i++){
+    pushFX({ kind:"spark", x, y, vx: rand(-3.0,3.0), vy: rand(-2.6,1.0), life: Math.floor(rand(8,14)) });
   }
 }
 
-// ===================== ENEMY ATTACKS =====================
+// ===================== ENEMY ATTACKS (DISTINTOS) =====================
 function enemyAttack(e){
   const t = performance.now();
 
@@ -731,6 +780,7 @@ function enemyAttack(e){
   const dy = (player.y + player.h*0.5) - (e.y + e.h*0.5);
   const dist = Math.hypot(dx,dy);
 
+  // BASIC: melee
   if(e.type === "basic"){
     if(dist < 70){
       damagePlayer(e.dmg);
@@ -741,26 +791,41 @@ function enemyAttack(e){
     return;
   }
 
+  // SPITTER / FLYER: spit
   if(e.type === "spitter" || e.type === "flyer"){
     if(dist < 860){
       const v = norm(dx, dy);
-      enemyBullets.push({ kind:"spit", x:e.x+e.w*0.55, y:e.y+e.h*0.50, vx:v.x*6.7, vy:v.y*6.7, r:6, life:150, dmg:10+Math.floor(level*0.6) });
+      enemyBullets.push({
+        kind:"spit",
+        x:e.x+e.w*0.55, y:e.y+e.h*0.50,
+        vx:v.x*6.7, vy:v.y*6.7,
+        r:6, life:150,
+        dmg:10+Math.floor(level*0.6)
+      });
       SFX.spit();
       e.nextAtk = t + (e.type==="flyer" ? 950 : 1100);
     } else e.nextAtk = t + 520;
     return;
   }
 
+  // TONGUE: latigazo rápido
   if(e.type === "tongue"){
     if(dist < 340){
       const v = norm(dx, dy);
-      enemyBullets.push({ kind:"tongue", x:e.x+e.w*0.55, y:e.y+e.h*0.50, vx:v.x*10.2, vy:v.y*10.2, r:4, life:26, dmg:14+Math.floor(level*0.7) });
+      enemyBullets.push({
+        kind:"tongue",
+        x:e.x+e.w*0.55, y:e.y+e.h*0.50,
+        vx:v.x*10.2, vy:v.y*10.2,
+        r:4, life:26,
+        dmg:14+Math.floor(level*0.7)
+      });
       SFX.web();
       e.nextAtk = t + 1050;
     } else e.nextAtk = t + 560;
     return;
   }
 
+  // DOG: carga
   if(e.type === "dog"){
     if(dist < 540){
       const dir = dx>=0 ? 1 : -1;
@@ -772,6 +837,7 @@ function enemyAttack(e){
     return;
   }
 
+  // SPIDER: salto
   if(e.type === "spider"){
     if(dist < 580){
       const v = norm(dx, dy);
@@ -783,11 +849,19 @@ function enemyAttack(e){
     return;
   }
 
+  // BOSS: cannon + summon
   if(e.type === "boss"){
     if(dist < 1500){
       e.attackT = 16;
       const v = norm(dx, dy);
-      enemyBullets.push({ kind:"cannon", x:e.x+e.w*0.20, y:e.y+e.h*0.52, vx:v.x*(e.enraged?8.2:7.2), vy:v.y*(e.enraged?8.2:7.2), r:12, life:190, dmg:(e.enraged?22:18) });
+      enemyBullets.push({
+        kind:"cannon",
+        x:e.x+e.w*0.20, y:e.y+e.h*0.52,
+        vx:v.x*(e.enraged?8.2:7.2),
+        vy:v.y*(e.enraged?8.2:7.2),
+        r:12, life:190,
+        dmg:(e.enraged?22:18)
+      });
       SFX.boss();
     }
     if(Math.random() < (e.enraged ? 0.45 : 0.30) && enemies.length < 18){
@@ -852,6 +926,7 @@ function isGrounded(){
   const gy = groundY() - player.h;
   return Math.abs(player.y - gy) < 0.01 && Math.abs(player.vy) < 0.01;
 }
+
 function applyCrouch(){
   const want = (keys.has("s") || keys.has("arrowdown")) && isGrounded();
   if(want === player.isCrouch) return;
@@ -870,10 +945,11 @@ function stepPlayer(){
   if(left) ax -= 1;
   if(right) ax += 1;
 
-  const spMul = player.isCrouch ? 0.55 : 1.0;
+  const spMul = player.isCrouch ? 0.60 : 1.0;
 
-  player.vx += ax * 0.75 * spMul;
-  player.vx *= 0.82;
+  // ✅ más responsive + menos “pegajoso”
+  player.vx += ax * 0.90 * spMul;
+  player.vx *= 0.88;
   player.vx = clamp(player.vx, -player.speed*spMul, player.speed*spMul);
 
   if(jumpQueued){
@@ -904,6 +980,7 @@ function stepPlayer(){
 
 function stepEnemies(){
   const t = performance.now();
+
   for(const e of enemies){
     if(e.dead) continue;
 
@@ -966,6 +1043,7 @@ function stepEnemies(){
 }
 
 function stepBullets(){
+  // player bullets
   for(const b of bullets){
     b.x += b.vx;
     b.y += b.vy;
@@ -982,6 +1060,7 @@ function stepBullets(){
   }
   bullets = bullets.filter(b=>b.life>0 && b.x>-100 && b.x<WORLD_W+100 && b.y>-100 && b.y<H()+100);
 
+  // enemy bullets
   for(const b of enemyBullets){
     b.x += b.vx;
     b.y += b.vy;
@@ -1042,7 +1121,6 @@ function stepFX(){
 
 // ===================== CAMERA =====================
 function updateCamera(){
-  // ✅ si viewW aún es raro, no rompas cámara
   const vw = Math.max(1, W());
   const maxCam = Math.max(0, WORLD_W - vw);
   const target = clamp(player.x - vw*0.40, 0, maxCam);
@@ -1057,7 +1135,7 @@ function updateCamera(){
 
 // ===================== EXIT DOOR =====================
 function setupExit(){
-  exitDoor.x = WORLD_W - 280;
+  exitDoor.x = WORLD_W - 220;   // ✅ más cerca del final del mundo del nivel
   exitDoor.w = 110;
   exitDoor.h = 140;
   exitDoor.y = groundY() - exitDoor.h;
@@ -1102,6 +1180,8 @@ function updateTopUI(){
 }
 
 // ===================== RENDER =====================
+
+// ✅ Fondo SIN glitches/costuras + parallax real
 function drawBackground(){
   const img = GFX.bg;
   const w = W(), h = H();
@@ -1109,10 +1189,18 @@ function drawBackground(){
   ctx.fillStyle = "#070b14";
   ctx.fillRect(0,0,w,h);
 
-  if(img){
-    const sx = Math.floor(cameraX * 0.55) % img.width;
-    for(let x=-sx; x<w; x+=img.width){
-      ctx.drawImage(img, x, 0, img.width, h);
+  if(img && img.complete && img.naturalWidth > 0 && img.naturalHeight > 0){
+    const iw = img.naturalWidth;
+    const ih = img.naturalHeight;
+
+    // escala para cubrir el alto del canvas sin deformar
+    const scale = h / ih;
+    const tileW = iw * scale;
+
+    const sx = (cameraX * 0.55) % tileW;
+
+    for(let x = -sx; x < w + tileW; x += tileW){
+      ctx.drawImage(img, x, 0, tileW, h);
     }
   } else {
     ctx.fillStyle="#0b1220";
@@ -1166,17 +1254,20 @@ function drawPlayer(){
 
   if(img){
     ctx.save();
-    const flip =
-      (player.facing === -1) &&
-      (img === GFX.idle || img === GFX.jump || img === GFX.hurt || img === GFX.injured || img === GFX.shoot);
 
-    if(flip){
+    // flip solo si NO tienes sprite runL
+    const needFlip =
+      (player.facing === -1) &&
+      (img !== GFX.runL); // si estás usando runL real, no flip
+
+    if(needFlip){
       ctx.translate(x + player.w, y);
       ctx.scale(-1, 1);
       ctx.drawImage(img, 0, 0, player.w, player.h);
     } else {
       ctx.drawImage(img, x, y, player.w, player.h);
     }
+
     ctx.restore();
   } else {
     ctx.fillStyle="#fff";
@@ -1193,6 +1284,7 @@ function drawEnemies(){
     const y = Math.round(e.y + (e.flyer ? Math.sin(e.bob)*2 : 0));
 
     let img = GFX[e.imgKey];
+
     if(e.boss){
       if(e.hurtT > 0) img = GFX.boss_hurt || GFX.boss_idle;
       else if(e.attackT > 0) img = GFX.boss_attack || GFX.boss_idle;
@@ -1207,6 +1299,7 @@ function drawEnemies(){
 }
 
 function drawBullets(){
+  // player bullets
   ctx.fillStyle = "rgba(250,204,21,0.95)";
   for(const b of bullets){
     const x = b.x - cameraX;
@@ -1215,6 +1308,7 @@ function drawBullets(){
     ctx.fill();
   }
 
+  // enemy bullets
   for(const b of enemyBullets){
     const x = b.x - cameraX;
     if(b.kind==="cannon"){
@@ -1230,6 +1324,18 @@ function drawBullets(){
   }
 }
 
+function drawDrops(){
+  for(const d of drops){
+    const x = d.x - cameraX;
+    ctx.fillStyle = d.kind==="ammo" ? "rgba(56,189,248,0.95)"
+                : d.kind==="med"  ? "rgba(251,113,133,0.95)"
+                : "rgba(250,204,21,0.95)";
+    ctx.fillRect(x, d.y, d.w, d.h);
+    ctx.strokeStyle="rgba(0,0,0,0.35)";
+    ctx.strokeRect(x, d.y, d.w, d.h);
+  }
+}
+
 function drawFX(){
   for(const p of fx){
     const x = p.x - cameraX;
@@ -1239,8 +1345,8 @@ function drawFX(){
       const img = GFX.muzzle;
       if(img){
         const frames = 3;
-        const fw = Math.floor(img.width / frames);
-        const fh = img.height;
+        const fw = Math.floor(img.naturalWidth / frames) || Math.floor(img.width / frames);
+        const fh = img.naturalHeight || img.height;
         const idx = clamp(Math.floor((10 - p.life) / 3), 0, 2);
 
         const size = 58;
@@ -1302,15 +1408,17 @@ function drawDoor(){
     ctx.fillText("SALIDA", x+26, y+24);
     ctx.font="12px Arial";
     ctx.fillText("META COMPLETA", x+12, y+44);
+    ctx.fillStyle="rgba(250,204,21,0.95)";
+    ctx.fillText("E para entrar", x+18, y+64);
   }
 }
 
 function drawHUD(){
   ctx.save();
   ctx.fillStyle="rgba(0,0,0,0.40)";
-  ctx.fillRect(12, 12, 520, 96);
+  ctx.fillRect(12, 12, 540, 96);
   ctx.strokeStyle="rgba(255,255,255,0.10)";
-  ctx.strokeRect(12, 12, 520, 96);
+  ctx.strokeRect(12, 12, 540, 96);
 
   ctx.fillStyle="rgba(255,255,255,0.92)";
   ctx.font="bold 14px Arial";
@@ -1319,8 +1427,9 @@ function drawHUD(){
   ctx.font="13px Arial";
   ctx.fillText(`Objetivo: ${killsThisLevel}/${killGoal===999?"BOSS":killGoal}`, 24, 54);
   ctx.fillText(`Munición: ${ammo.mag}/${ammo.maxMag}  |  Reserva: ${ammo.reserve}`, 24, 74);
-  ctx.fillText(`Medkits: ${medkits}`, 430, 74);
-  drawHealthBar(24, 84, 490, 10, player.hp, player.maxHp, true);
+  ctx.fillText(`Medkits: ${medkits}`, 450, 74);
+
+  drawHealthBar(24, 84, 510, 10, player.hp, player.maxHp, true);
   ctx.restore();
 }
 
@@ -1370,6 +1479,7 @@ function step(){
 function render(){
   drawBackground();
   drawDoor();
+  drawDrops();
   drawEnemies();
   drawBullets();
   drawPlayer();
@@ -1388,6 +1498,9 @@ function loop(){
 function setupLevel(lvl){
   level = lvl;
 
+  // ✅ mundo por nivel (IMPORTANTE para que no sea eterno)
+  WORLD_W = worldWidthForLevel(lvl);
+
   // reset player
   player.isCrouch = false;
   player.h = player.baseH;
@@ -1402,16 +1515,21 @@ function setupLevel(lvl){
   ammo.maxMag = 18 + Math.floor((lvl-1)/2)*2;
   ammo.mag = ammo.maxMag;
   ammo.reserve += 40;
+
   medkits = clamp(medkits + 1, 0, 6);
   player.hp = clamp(player.hp + 18, 0, player.maxHp);
+
+  bullets.length = 0;
+  enemyBullets.length = 0;
+  drops.length = 0;
+  fx.length = 0;
 
   spawnWave(lvl);
   setupExit();
   updateTopUI();
 
-  // ✅ cámara SIEMPRE válida
   cameraVx = 0;
-  cameraX  = clamp(player.x - Math.max(1,W())*0.40, 0, Math.max(0, WORLD_W - Math.max(1,W())));
+  cameraX = clamp(player.x - W()*0.40, 0, Math.max(0, WORLD_W - W()));
 
   paused = false;
   if(btnPause) btnPause.textContent = "Pausa";
